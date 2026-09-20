@@ -45,8 +45,8 @@ class EventTests(OfflineTest):
         self.assertEqual((result, error), (0, ""))
         send.assert_called_once()
         notification = send.call_args.args[1]
-        self.assertEqual(notification.title, "Codex complete · 测试电脑")
-        self.assertEqual(notification.message, "Project: demo\nStatus: completed\nSummary: Finished tests.")
+        self.assertEqual(notification.title, "demo · 本轮已完成")
+        self.assertEqual(notification.message, "Device: 测试电脑\nProject: demo\nStatus: turn completed\nSummary: Finished tests.")
 
     def test_unsupported_events_do_not_load_config_or_publish(self):
         for kind in ("approval-requested", "other", None, [], {}):
@@ -116,6 +116,14 @@ class ConfigTests(OfflineTest):
         self.assertEqual(config.provider, "ntfy")
         self.assertEqual(config.ntfy.server, "https://ntfy.sh")
         self.assertEqual(config.ntfy.timeout, 5)
+        self.assertFalse(config.task_title)
+
+    def test_task_title_opt_in_validation(self):
+        self.assertTrue(self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="1")).task_title)
+        for value in ("", "true", "2", "private-value"):
+            with self.assertRaises(ConfigurationError) as raised:
+                self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE=value))
+            self.assertNotIn("private-value", str(raised.exception))
 
     def test_blank_device_uses_hostname_and_hostname_failure_degrades(self):
         with patch("notify.socket.gethostname", side_effect=OSError("private hostname")):
@@ -262,6 +270,7 @@ class CliTests(OfflineTest):
         with tempfile.TemporaryDirectory(prefix="codex notify 中文 ") as directory:
             script = Path(directory) / "notify.py"
             shutil.copyfile(ROOT / "notify.py", script)
+            shutil.copyfile(ROOT / "task_metadata.py", Path(directory) / "task_metadata.py")
             shutil.copytree(ROOT / "providers", Path(directory) / "providers",
                             ignore=shutil.ignore_patterns("__pycache__"))
             result = subprocess.run([sys.executable, str(script), '{"type":"unsupported"}'],

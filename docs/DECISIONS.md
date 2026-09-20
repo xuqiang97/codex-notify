@@ -297,6 +297,27 @@ Only add another provider because real testing reveals a need, not because addit
 
 For Xiaomi/HyperOS in particular, background/battery behavior should be tested in practice.
 
+## Decision 014 — Project-first titles and optional local task names
+
+**Status:** Accepted after the user requested specific project/task completion
+notifications instead of the generic completion title.
+
+Put the project basename and, when available and enabled, the Codex task title in
+the mobile title. Keep the device in the body. Use “本轮已完成” / “turn completed”
+to avoid claiming the whole task succeeded merely because one turn ended.
+
+Task names are disabled by default (`CODEX_NOTIFY_TASK_TITLE=0`). Opting in reads
+only the last 1 MiB of Codex's existing local `session_index.jsonl`, matches the
+exact event `thread-id`, and uses the latest matching `thread_name`. The index is
+an internal detail, so missing/changed/unreadable metadata must degrade safely.
+Do not create a database, scan transcripts or extract a title from user prompts.
+
+This extends Decision 008's minimal payload with an explicitly enabled title,
+filtered before truncation to 80 characters. Title text may itself be sensitive
+and must be described as a separate opt-in from assistant summaries. Disabling
+summaries omits that line without disabling the task name. Core Python, official
+notify, ntfy, standard-library and completion-only decisions remain unchanged.
+
 ## Changing these decisions
 
 A future contributor may propose a change, but should:

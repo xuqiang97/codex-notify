@@ -50,10 +50,27 @@ Windows runner result.
   not reliably identifiable. Set `CODEX_NOTIFY_SUMMARY_MAX=0` for sensitive work;
   non-sensitive device/project labels are still required. See README boundaries.
 
-## Pending real-environment acceptance
+## Follow-up: named tasks and iPhone delivery (2026-09-20)
 
-No personal topic or phone subscription was available to the implementation run.
-No user-level Codex config was modified. Execute the following with private local
+The user confirmed receiving both a manual notification and a notification after
+the requested real Codex completion test on iPhone. This is user-reported device
+receipt; exact latency/count, lock-screen timing and all network conditions have
+not been independently recorded. Android and the two-Windows-machine checks
+remain pending. The original 47-test Windows/macOS × Python 3.10/3.13 CI matrix
+[passed](https://github.com/xuqiang97/codex-notify/actions/runs/35500220916).
+
+Project/task title changes add 17 offline checks (64 total), including opt-in
+validation, exact ID matching, latest rename, corrupt/missing/unreadable index,
+bounded-tail reading, privacy before truncation, disabled lookup without disk
+access, and summary-independent named notifications. Index tests use temporary
+fake metadata; real local task titles and private topics are never test fixtures.
+
+## Original real-environment acceptance checklist
+
+No personal topic or phone subscription was available to the initial implementation
+run, and that initial run did not modify user-level Codex config. Subsequent local
+setup and user-reported iPhone receipt are recorded above. Execute the remaining
+checks with private local
 configuration; do not attach topics, tokens or confidential notification content
 to the evidence.
 

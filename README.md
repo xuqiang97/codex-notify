@@ -74,7 +74,8 @@ different aliases. Different people should generate different topics.
 | `NTFY_TOPIC` | Required | 1–64 ASCII letters/digits/`_`/`-`; use the random generator |
 | `NTFY_TOKEN` | Empty | Optional bearer token for an authenticated server/account |
 | `CODEX_NOTIFY_DEVICE` | Hostname | Blank also uses the hostname; label capped at 64 characters |
-| `CODEX_NOTIFY_SUMMARY_MAX` | `300` | 0–500 characters, including ellipsis; `0` uses a generic message |
+| `CODEX_NOTIFY_SUMMARY_MAX` | `300` | 0–500 characters, including ellipsis; `0` omits the summary |
+| `CODEX_NOTIFY_TASK_TITLE` | `0` | `1` opts into local task-title lookup; independent of the summary |
 | `CODEX_NOTIFY_TIMEOUT` | `5` | Total delivery wait and socket timeout in seconds; `0 < value <= 30` |
 
 Precedence: **process environment > script-local `.env` > non-secret defaults**.
@@ -124,10 +125,11 @@ synthetic event and Unicode text. It does not invoke Codex or an AI API. Expecte
 display:
 
 ```text
-Codex complete · Laptop-A
+codex-notify · 本轮已完成
 
+Device: Laptop-A
 Project: codex-notify
-Status: completed
+Status: turn completed
 Summary: Manual notification test completed. 测试完成 ✅
 ```
 
@@ -173,6 +175,48 @@ and [configuration reference](https://developers.openai.com/docs/config-file/con
 The external hook and terminal `tui.notifications` are different features.
 V1 only handles `agent-turn-complete`; approval events are ignored.
 
+## Project and task names in notifications
+
+The title now shows the project basename and **本轮已完成** (this turn completed).
+To also show the Codex task name, add this opt-in setting to the sender's `.env`:
+
+```dotenv
+CODEX_NOTIFY_TASK_TITLE=1
+```
+
+For example, a task named “修复登录问题” in project `my-app` appears as:
+
+```text
+my-app · 修复登录问题 · 本轮已完成
+
+Device: Laptop-A
+Project: my-app
+Task: 修复登录问题
+Status: turn completed
+```
+
+The example uses `CODEX_NOTIFY_SUMMARY_MAX=0`: task names still work while no
+assistant response is sent. The two privacy settings are independent.
+
+The official completion event is not assumed to contain a task title. When
+explicitly enabled, the sender matches its `thread-id` to the existing local
+`session_index.jsonl` in `CODEX_HOME` (default `~/.codex`). It reads only the last
+1 MiB and uses the latest matching `thread_name`, capped at 80 characters after
+privacy checks. It never uses `input-messages` or another task's name as a fallback,
+never reads transcripts or databases, and never writes to the index.
+
+This index is an internal Codex detail, **not a stable API**. Missing, unreadable,
+changed, incomplete or older-than-the-tail metadata produces a project-only title;
+stale index data can show an older task name. If the project is unavailable too,
+the sender shows the available task name or `Codex`. A project name remains a
+folder basename, not necessarily a custom sidebar project label. The synthetic
+smoke test has no thread ID, so it intentionally shows only the project.
+
+Task names may contain sensitive words or originate from your initial request.
+Enabling this option permits that bounded title to leave the computer. Rename
+sensitive tasks or keep the option disabled. The same conservative content filters
+apply; they cannot detect arbitrary confidential prose.
+
 ## Privacy and security boundaries
 
 - Anonymous topics are shared secrets, not authenticated private channels.
@@ -181,8 +225,8 @@ V1 only handles `agent-turn-complete`; approval events are ignored.
   needed. A token does not by itself make an otherwise public topic private.
 - `.env` and `.env.*` are Git-ignored, except the safe `.env.example`. Never use
   `git add -f` for private config. The template topic is rejected by the sender.
-- Only device alias, project **basename**, completion status and a bounded
-  assistant excerpt are sent. `input-messages`, thread/turn IDs, unknown fields
+- Only device alias, project **basename**, completion status, a bounded
+  assistant excerpt and (when opted in) a bounded task title are sent. `input-messages`, thread/turn IDs, unknown fields
   and the raw event are not forwarded. Project uses an absolute event `cwd` if
   usable, otherwise process cwd, then `unknown-project`. Both Windows and POSIX
   paths work. Project and device labels are limited to 64 characters.
@@ -193,7 +237,7 @@ V1 only handles `agent-turn-complete`; approval events are ignored.
   a guarantee against arbitrary secrets, unfenced code, or customer/business
   data**. A short ordinary response may fit entirely in the excerpt.
 - For sensitive work set `CODEX_NOTIFY_SUMMARY_MAX=0` to send no assistant text.
-  Device and project names still travel to the provider; keep them non-sensitive
+  Device/project names and any enabled task title still travel to the provider; keep them non-sensitive
   or do not enable the hook for confidential projects. No source files, diffs or
   conversations are read from disk. No content is written to application logs.
 - HTTPS certificate verification stays enabled. HTTP, URL credentials, query
@@ -236,11 +280,12 @@ iOS push forwarding configuration are outside V1; follow ntfy's server docs.
 Read [AGENTS.md](AGENTS.md), [implementation contract](docs/IMPLEMENTATION.md) and
 [accepted decisions](docs/DECISIONS.md) before editing. Core event/config/content
 logic lives in `notify.py`; transport is in `providers/ntfy.py`, with provider-neutral
-types in `providers/__init__.py`.
+types in `providers/__init__.py`. Optional task-title lookup is isolated in
+`task_metadata.py`.
 
 ```console
 python -m unittest discover -v
-python -m compileall -q notify.py providers tests scripts
+python -m compileall -q notify.py task_metadata.py providers tests scripts
 git diff --check
 ```
 

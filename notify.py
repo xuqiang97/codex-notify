@@ -15,6 +15,7 @@ import unicodedata
 
 from providers import ConfigurationError, Notification, ProviderError
 from providers import ntfy
+from task_metadata import lookup_task_title
 
 
 DEFAULT_SUMMARY = "Codex finished the task."
@@ -27,6 +28,7 @@ class Config:
     device: str = field(repr=False)
     summary_max: int
     ntfy: ntfy.NtfyConfig = field(repr=False)
+    task_title: bool = False
 
 
 def parse_event(raw: str) -> dict:
@@ -82,13 +84,16 @@ def load_config(
         summary_max = -1
     if not 0 <= summary_max <= 500:
         raise ConfigurationError("CODEX_NOTIFY_SUMMARY_MAX must be an integer from 0 to 500")
+    task_title = values.get("CODEX_NOTIFY_TASK_TITLE", "0").strip()
+    if task_title not in ("0", "1"):
+        raise ConfigurationError("CODEX_NOTIFY_TASK_TITLE must be 0 or 1")
     device = values.get("CODEX_NOTIFY_DEVICE", "").strip()
     if not device:
         try:
             device = socket.gethostname()
         except OSError:
             device = "unknown-device"
-    return Config(provider, device, summary_max, ntfy.load_config(values))
+    return Config(provider, device, summary_max, ntfy.load_config(values), task_title == "1")
 
 
 def normalize(text: str) -> str:
@@ -160,10 +165,27 @@ def build_notification(event: dict, config: Config) -> Notification:
     project = project_name(event)
     if private_text(project, secrets):
         project = "unknown-project"
+    task = lookup_task_title(event) if config.task_title else None
+    if task is not None:
+        task = None if private_text(task, secrets) else truncate(normalize(task), 80) or None
     summary = build_summary(event.get("last-assistant-message"), config.summary_max, secrets)
+    title_parts = []
+    if project != "unknown-project":
+        title_parts.append(project)
+    if task:
+        title_parts.append(task)
+    title_parts.append("本轮已完成")
+    if len(title_parts) == 1:
+        title_parts.insert(0, "Codex")
+    lines = [f"Device: {truncate(device, 64) or 'unknown-device'}", f"Project: {project}"]
+    if task:
+        lines.append(f"Task: {task}")
+    lines.append("Status: turn completed")
+    if config.summary_max:
+        lines.append(f"Summary: {summary}")
     return Notification(
-        title=f"Codex complete · {truncate(device, 64) or 'unknown-device'}",
-        message=f"Project: {project}\nStatus: completed\nSummary: {summary}",
+        title=" · ".join(title_parts),
+        message="\n".join(lines),
     )
 
 

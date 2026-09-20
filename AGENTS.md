@@ -149,15 +149,32 @@ Recommended shape:
 
 ```text
 Title:
-Codex complete · <device>
+<project> · <task name, if enabled and available> · 本轮已完成
 
 Message:
+Device: <device>
 Project: <project>
-Status: completed
+Task: <task name, if enabled and available>
+Status: turn completed
 Summary: <short summary>
 ```
 
 Exact punctuation may evolve, but the information model should stay compact.
+Completion means the Codex turn ended, not that all work or tests succeeded.
+When `CODEX_NOTIFY_SUMMARY_MAX=0`, omit the summary line.
+
+### Optional task name
+
+The user requested recognizable project/task completion notifications. Task-title
+lookup is opt-in with `CODEX_NOTIFY_TASK_TITLE=1` (default `0`). Use only the exact
+event `thread-id` to look up the latest matching `thread_name` in the existing
+`CODEX_HOME/session_index.jsonl` (default home `~/.codex`). Read at most the final
+1 MiB, never modify it, and never read transcripts/databases or derive a title
+from user prompts. This is best-effort internal metadata, not an official API.
+Missing/unreadable/changed metadata must fall back to project-only notifications.
+Apply privacy checks before truncating the title to 80 characters. The local title
+can itself contain sensitive text: keep this setting independent of summaries
+and document the disclosure when opting in. No new database or history service.
 
 ### 6.1 Device name
 

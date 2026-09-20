@@ -10,6 +10,12 @@ V1 plan and acceptance contract. See [VALIDATION.md](VALIDATION.md) for executed
 software checks and remaining real-device acceptance; see [README](../README.md)
 for the final configuration and commands.
 
+Follow-up: project-first notification titles and optional task-name metadata are
+implemented per Decision 014. Task-title lookup is a bounded read of an existing
+local index, disabled by default. Validate exact-thread matching, safe fallback,
+privacy filtering and summary-independent operation; no transcript access or
+additional service is introduced. Current content examples are in README.
+
 ## 1. Goal
 
 Deliver the smallest reliable V1 that turns a real Codex `agent-turn-complete` event into a concise mobile notification through ntfy.
