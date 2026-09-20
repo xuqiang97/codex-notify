@@ -4,6 +4,12 @@ This document turns the approved architecture into an executable implementation 
 
 Read `AGENTS.md` first. If this file and `AGENTS.md` conflict, follow `AGENTS.md`.
 
+Implementation status: the Python/ntfy sender, local configuration, offline tests
+and user setup instructions now exist. The sections below retain the approved
+V1 plan and acceptance contract. See [VALIDATION.md](VALIDATION.md) for executed
+software checks and remaining real-device acceptance; see [README](../README.md)
+for the final configuration and commands.
+
 ## 1. Goal
 
 Deliver the smallest reliable V1 that turns a real Codex `agent-turn-complete` event into a concise mobile notification through ntfy.

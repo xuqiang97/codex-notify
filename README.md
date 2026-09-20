@@ -1,136 +1,258 @@
 # codex-notify
 
-Cross-platform mobile notifications for OpenAI Codex completion events.
-
-> **Status:** V1 specification is ready. The first implementation is intentionally left for the next coding agent to complete from the repository instructions.
-
-## Why this project exists
-
-Codex can run long local tasks on a developer's computer. When the developer walks away from the machine, repeatedly checking a remote-desktop session just to see whether the task has finished is wasteful.
-
-`codex-notify` bridges Codex's official external `notify` hook to a mobile push provider so a completed local task can proactively notify a phone.
-
-## V1 architecture
+Send a concise Codex completion notification to Android or iPhone:
 
 ```text
-Codex
-  |
-  | agent-turn-complete
-  v
-notify.py
-  |
-  | provider interface
-  v
-ntfy
-  |
-  +--> Android
-  +--> iPhone
+Codex official notify -> notify.py -> HTTPS ntfy -> Android / iPhone
 ```
 
-The same Python implementation must work on Windows and macOS.
+**Implementation available; real-device acceptance is still pending.** The sender
+uses Python 3.10+ and the standard library only. It handles `agent-turn-complete`,
+with one publish attempt per invocation. There is no daemon, polling, AI summary
+API, remote approval, or remote control. “Completed” means the Codex turn ended;
+it does not assert that the task or its tests succeeded.
 
-## Decisions already made
+## 1. Prerequisites and clone
 
-- Use the official Codex `notify` hook.
-- Use Python for the local notification program: `notify.py`.
-- Use ntfy as the default V1 push provider.
-- Start with the hosted `https://ntfy.sh` service; do not require self-hosting for V1.
-- Keep the notification core provider-agnostic enough to add Pushover, ServerChan, or another provider later.
-- Use one high-entropy ntfy topic per person. Multiple computers owned by the same person may share that person's topic.
-- Never commit real topics, tokens, or other credentials.
-- Default notifications should contain only device name, project name, completion status, and a short assistant-summary excerpt. Do not publish full prompts, full responses, source code, or sensitive business data.
+- Python 3.10+ and Git on Windows or macOS.
+- A local Codex version supporting the official external `notify` hook.
+- HTTPS access to `https://ntfy.sh` from the computer and phone.
+- The ntfy mobile app, with notification permission enabled.
 
-See [AGENTS.md](AGENTS.md) for the implementation contract and [docs/DECISIONS.md](docs/DECISIONS.md) for the decision record.
+```console
+git clone https://github.com/xuqiang97/codex-notify.git
+cd codex-notify
+```
 
-## Target V1
+No `pip install` is needed. In Windows PowerShell, use `python`; on macOS use
+`python3`. Check the actual interpreter with:
 
-V1 should:
+```console
+python -c "import sys; print(sys.version); print(sys.executable)"
+```
 
-1. Accept the Codex notification JSON passed to `notify.py`.
-2. Ignore unsupported events.
-3. Handle `agent-turn-complete`.
-4. Derive a friendly device name and project name.
-5. Build a compact, privacy-conscious completion notification.
-6. Send it to ntfy over HTTPS.
-7. Fail gracefully if the network or provider is unavailable.
-8. Work on both Windows and macOS without platform-specific notification code.
-9. Include automated tests that do not send real network notifications.
+Replace `python` with `python3` on macOS. Save the printed executable path for
+Codex configuration, especially when launching Codex from a GUI with a different
+PATH. Native Windows and native macOS are the targets; WSL needs its own Linux
+Python and paths and has not been validated here.
 
-## Planned repository shape
+## 2. Configure a private topic locally
+
+Copy `.env.example` to **`.env` beside `notify.py`**:
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+python -c "import secrets; print(secrets.token_hex(24))"
+notepad .env
+```
+
+macOS:
+
+```sh
+cp .env.example .env
+chmod 600 .env
+python3 -c "import secrets; print(secrets.token_hex(24))"
+open -e .env
+```
+
+These commands print a fresh 48-character random topic locally. Paste it into
+`NTFY_TOPIC` in `.env`, replacing the template. Do not share the output, commit it,
+paste it into issues, or put it in shell commands/history. Save `.env` as UTF-8
+(Windows UTF-8 BOM and CRLF are supported). Restrict Windows file access to your
+user using file Properties → Security if the directory is shared.
+
+Set `CODEX_NOTIFY_DEVICE` to a short, non-sensitive machine alias such as
+`Laptop-A`. Two machines owned by the same person can use the same topic and
+different aliases. Different people should generate different topics.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `CODEX_NOTIFY_PROVIDER` | `ntfy` | Only V1 provider |
+| `NTFY_SERVER` | `https://ntfy.sh` | HTTPS origin; optional port, no path/query/credentials |
+| `NTFY_TOPIC` | Required | 1–64 ASCII letters/digits/`_`/`-`; use the random generator |
+| `NTFY_TOKEN` | Empty | Optional bearer token for an authenticated server/account |
+| `CODEX_NOTIFY_DEVICE` | Hostname | Blank also uses the hostname; label capped at 64 characters |
+| `CODEX_NOTIFY_SUMMARY_MAX` | `300` | 0–500 characters, including ellipsis; `0` uses a generic message |
+| `CODEX_NOTIFY_TIMEOUT` | `5` | Total delivery wait and socket timeout in seconds; `0 < value <= 30` |
+
+Precedence: **process environment > script-local `.env` > non-secret defaults**.
+An explicitly empty environment value overrides the file; an empty topic disables
+publishing with a configuration error. The working project's `.env` is never
+read. Each copy of the sender has its own `.env`.
+
+The small `.env` parser accepts literal `KEY=value`, blank lines, full-line `#`
+comments and matching single/double quotes. No `export`, interpolation, escape
+processing, multiline values or inline comments. A `#` inside a value is literal.
+Duplicate keys use the last value. Malformed lines fail locally without printing
+their contents. Environment-only configuration is also supported; ensure the
+Codex process actually inherits it and restart Codex after changing its environment.
+
+## 3. Subscribe on the phone
+
+Install the official ntfy client using the links on
+[ntfy's mobile setup page](https://docs.ntfy.sh/subscribe/phone/): Android from
+Google Play/F-Droid/official APK, iPhone from the App Store. Add a subscription to
+server `https://ntfy.sh` and exactly the topic saved in your `.env`. Allow
+notifications and check the subscription is not muted.
+
+For Xiaomi/HyperOS, test foreground, background and locked-screen delivery. If
+background delivery fails, check notification permission, autostart/background
+activity and battery restrictions for ntfy; menu names vary by OS release.
+On iPhone, check notification/lock-screen permissions and Focus settings. Test on
+Wi-Fi and cellular. These are checks to perform, not a claim of tested delivery.
+
+## 4. First manual test
+
+From this repository directory, run:
+
+Windows:
+
+```powershell
+python scripts/smoke_test.py
+```
+
+macOS:
+
+```sh
+python3 scripts/smoke_test.py
+```
+
+**This sends one real notification** using your local topic, with a harmless
+synthetic event and Unicode text. It does not invoke Codex or an AI API. Expected
+display:
 
 ```text
-codex-notify/
-├── AGENTS.md
-├── README.md
-├── LICENSE
-├── .env.example
-├── .gitignore
-├── notify.py
-├── providers/
-│   ├── __init__.py
-│   └── ntfy.py
-├── tests/
-│   └── test_notify.py
-└── docs/
-    ├── DECISIONS.md
-    └── IMPLEMENTATION.md
+Codex complete · Laptop-A
+
+Project: codex-notify
+Status: completed
+Summary: Manual notification test completed. 测试完成 ✅
 ```
 
-The coding agent may keep the implementation even smaller if it preserves the provider boundary and all V1 acceptance criteria.
+The sender is silent on success. Check both stderr and your phone: exit code zero
+alone does not prove delivery. Provider errors also return zero to keep the Codex
+turn successful. Missing/bad local configuration or input returns `2`.
 
-## Codex configuration
+## 5. Configure Codex's official hook
 
-Codex notification configuration belongs in the user-level `~/.codex/config.toml`.
+Edit the **user-level** config: Windows `%USERPROFILE%\.codex\config.toml`, macOS
+`~/.codex/config.toml` (or `config.toml` under your custom `CODEX_HOME`). Back it up
+first and preserve existing settings. Put `notify` at the **TOML top level, before
+any `[section]` headers**; replace an existing `notify` instead of defining it twice.
+Project-local `.codex/config.toml` is not the place for this setting.
 
-Windows example:
+Windows, using your actual Python executable and clone path:
 
 ```toml
 notify = [
-  "python",
-  "C:\\path\\to\\codex-notify\\notify.py"
+  "C:\\Users\\you\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+  "C:\\Users\\you\\path\\codex-notify\\notify.py"
 ]
 ```
 
-macOS example:
+macOS, substituting the result of `python3 -c 'import sys; print(sys.executable)'`:
 
 ```toml
 notify = [
-  "python3",
-  "/Users/you/path/to/codex-notify/notify.py"
+  "/absolute/path/to/python3",
+  "/Users/you/path/codex-notify/notify.py"
 ]
 ```
 
-Codex currently supports the external `agent-turn-complete` notification event. Do not design V1 around approval-request notifications or other events that the external hook does not currently expose.
+`"python"` or `"python3"` also works when it resolves in Codex's PATH. Each array
+item is an argument, so paths containing spaces need no extra embedded quotation
+marks. Do not add an event JSON argument: Codex appends it. Do not put the topic or
+token in this config. Restart Codex, run a small task, and verify one notification
+for its completed turn. Multiple completed turns produce multiple notifications;
+there is no history or deduplication store.
 
-Official Codex reference:
-- https://developers.openai.com/docs/config-file/config-advanced
-- https://developers.openai.com/docs/config-file/config-reference
+References: [official notify documentation](https://developers.openai.com/zh-Hans/docs/config-file/config-advanced)
+and [configuration reference](https://developers.openai.com/docs/config-file/config-reference).
+The external hook and terminal `tui.notifications` are different features.
+V1 only handles `agent-turn-complete`; approval events are ignored.
 
-## ntfy
+## Privacy and security boundaries
 
-V1 uses ntfy because it provides a simple HTTP API, Android and iOS clients, hosted service for zero-ops onboarding, and an open-source self-hosting path if requirements change later.
+- Anonymous topics are shared secrets, not authenticated private channels.
+  Anyone who knows a topic may be able to read/publish to it. Generate random
+  topics, rotate one if exposed, and use server-supported authentication/ACLs when
+  needed. A token does not by itself make an otherwise public topic private.
+- `.env` and `.env.*` are Git-ignored, except the safe `.env.example`. Never use
+  `git add -f` for private config. The template topic is rejected by the sender.
+- Only device alias, project **basename**, completion status and a bounded
+  assistant excerpt are sent. `input-messages`, thread/turn IDs, unknown fields
+  and the raw event are not forwarded. Project uses an absolute event `cwd` if
+  usable, otherwise process cwd, then `unknown-project`. Both Windows and POSIX
+  paths work. Project and device labels are limited to 64 characters.
+- Whitespace is normalized; Unicode is preserved. A long response is truncated
+  with `…`. Recognizable absolute paths, URLs, code blocks/inline code, diff/code
+  markers, credential patterns or the configured topic/token in the response
+  cause a generic summary instead. This is conservative pattern matching, **not
+  a guarantee against arbitrary secrets, unfenced code, or customer/business
+  data**. A short ordinary response may fit entirely in the excerpt.
+- For sensitive work set `CODEX_NOTIFY_SUMMARY_MAX=0` to send no assistant text.
+  Device and project names still travel to the provider; keep them non-sensitive
+  or do not enable the hook for confidential projects. No source files, diffs or
+  conversations are read from disk. No content is written to application logs.
+- HTTPS certificate verification stays enabled. HTTP, URL credentials, query
+  strings and redirects are rejected. Topics go in the JSON body, tokens only in
+  the Authorization header. Errors never echo the payload, config values, URL,
+  provider response body or underlying exception text.
+- Transport encryption is not end-to-end encryption. ntfy and the mobile push
+  infrastructure process notifications; server caching follows ntfy defaults.
+  Phone lock-screen previews may expose content. See the
+  [ntfy publish/security details](https://docs.ntfy.sh/publish/) and
+  [privacy policy](https://ntfy.sh/docs/privacy/).
+- One attempt, no retries. A daemon network worker plus a bounded wait prevents
+  DNS/slow headers from keeping the CLI alive beyond the timeout (apart from
+  process startup/scheduling). On timeout delivery is unknown; retrying manually
+  could duplicate a message. This is a best-effort convenience notification.
 
-Official references:
-- https://github.com/binwiederhier/ntfy
-- https://docs.ntfy.sh/
-- https://docs.ntfy.sh/publish/
+## Troubleshooting
 
-## Security
+| Symptom | Check |
+| --- | --- |
+| `NTFY_TOPIC is required` or template error | Edit the sender's `.env`, remove stale/empty environment overrides |
+| Invalid `.env` / UTF-8 error | Check reported line, matching quotes, encoding and file permissions |
+| HTTP 401/403 | Topic permissions, server account and optional token |
+| HTTP 429 | Server rate limits; sender does not retry |
+| HTTP 3xx | Use the server's final HTTPS origin; redirects are deliberately disabled |
+| Connection error/timeout | DNS, firewall/proxy, TLS trust, HTTPS reachability; do not disable TLS verification |
+| Manual test works, Codex does not | User-level top-level `notify`, absolute paths, correct interpreter, restart Codex, supported event/version |
+| Notification goes to wrong phone | Environment overrides, server/topic subscription; different users need separate topics |
+| Only generic summary | No assistant text, summary disabled, or conservative privacy filter matched |
+| Wrong project label | Missing/invalid event cwd; fallback uses the hook process directory |
+| Phone delivery delayed | App permissions, mute/Focus, battery/background restrictions and network; compare foreground vs locked |
 
-Treat an anonymous ntfy topic as a secret. Use a long random value and never use predictable names such as `codex`, a person's name, a repository name, or a company name.
+Proxy behavior follows Python urllib's platform/environment proxy configuration.
+The worker observes the same timeout and safe error handling through a proxy.
+Changing `NTFY_SERVER` to a self-hosted origin is supported, but deployment and
+iOS push forwarding configuration are outside V1; follow ntfy's server docs.
 
-Real configuration belongs in local environment/config files ignored by Git. The repository should only contain safe examples.
+## Development and validation
 
-## Development
+Read [AGENTS.md](AGENTS.md), [implementation contract](docs/IMPLEMENTATION.md) and
+[accepted decisions](docs/DECISIONS.md) before editing. Core event/config/content
+logic lives in `notify.py`; transport is in `providers/ntfy.py`, with provider-neutral
+types in `providers/__init__.py`.
 
-Before making implementation changes, read:
+```console
+python -m unittest discover -v
+python -m compileall -q notify.py providers tests scripts
+git diff --check
+```
 
-1. [AGENTS.md](AGENTS.md)
-2. [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)
-3. [docs/DECISIONS.md](docs/DECISIONS.md)
+On macOS use `python3`. All automated tests are offline, use fake topics/tokens,
+and mock HTTP; accidental socket use is blocked in the in-process test fixtures.
+Subprocess tests cover argument handling and daemon timeout exit without real
+publishing. The smoke script is manual and is **not** discovered by unittest.
+GitHub Actions runs the same tests on Windows/macOS with Python 3.10 and 3.13.
 
-The project should prefer Python's standard library and keep installation friction low.
+See [validation record](docs/VALIDATION.md) for executed checks and pending device
+acceptance. Automated request construction is not proof of mobile receipt.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

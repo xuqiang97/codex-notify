@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Codex agent-turn-complete -> a small, privacy-conscious mobile notification."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import json
+import os
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import re
+import socket
+import sys
+from typing import Mapping
+import unicodedata
+
+from providers import ConfigurationError, Notification, ProviderError
+from providers import ntfy
+
+
+DEFAULT_SUMMARY = "Codex finished the task."
+ENV_PATH = Path(__file__).resolve().with_name(".env")
+
+
+@dataclass(frozen=True)
+class Config:
+    provider: str
+    device: str = field(repr=False)
+    summary_max: int
+    ntfy: ntfy.NtfyConfig = field(repr=False)
+
+
+def parse_event(raw: str) -> dict:
+    try:
+        event = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise ValueError("event must be valid JSON") from None
+    if not isinstance(event, dict):
+        raise ValueError("event must be a JSON object")
+    return event
+
+
+def is_supported_event(event: dict) -> bool:
+    return event.get("type") == "agent-turn-complete"
+
+
+def read_env(path: Path) -> dict[str, str]:
+    """Read literal KEY=value lines; never execute, expand, or unescape text."""
+    try:
+        contents = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return {}
+    except (OSError, UnicodeError):
+        raise ConfigurationError("cannot read the local .env as UTF-8") from None
+    values = {}
+    for number, line in enumerate(contents.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise ConfigurationError(f"invalid .env syntax on line {number}")
+        if value.startswith(("'", '"')):
+            if len(value) < 2 or value[-1] != value[0]:
+                raise ConfigurationError(f"unclosed .env quote on line {number}")
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def load_config(
+    environ: Mapping[str, str] | None = None, env_path: Path | None = None,
+) -> Config:
+    values = read_env(ENV_PATH if env_path is None else env_path)
+    values.update(os.environ if environ is None else environ)
+    provider = values.get("CODEX_NOTIFY_PROVIDER", "ntfy").strip().lower()
+    if provider != "ntfy":
+        raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
+    try:
+        summary_max = int(values.get("CODEX_NOTIFY_SUMMARY_MAX", "300"))
+    except ValueError:
+        summary_max = -1
+    if not 0 <= summary_max <= 500:
+        raise ConfigurationError("CODEX_NOTIFY_SUMMARY_MAX must be an integer from 0 to 500")
+    device = values.get("CODEX_NOTIFY_DEVICE", "").strip()
+    if not device:
+        try:
+            device = socket.gethostname()
+        except OSError:
+            device = "unknown-device"
+    return Config(provider, device, summary_max, ntfy.load_config(values))
+
+
+def normalize(text: str) -> str:
+    # Preserve normal Unicode and emoji joiners; drop control/bidi/surrogate data.
+    cleaned = "".join(
+        " " if char.isspace() else char
+        for char in text
+        if char.isspace() or not unicodedata.category(char).startswith("C") or char == "\u200d"
+    )
+    return " ".join(cleaned.split())
+
+
+def truncate(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def project_name(event: dict) -> str:
+    def basename(value: object) -> str:
+        if not isinstance(value, str) or not value.strip() or "\x00" in value:
+            return ""
+        windows = PureWindowsPath(value)
+        path = windows if windows.drive or "\\" in value else PurePosixPath(value)
+        # A relative cwd is ambiguous; don't let arbitrary event text become metadata.
+        if not path.is_absolute() or ".." in path.parts:
+            return ""
+        return path.name
+
+    name = basename(event.get("cwd"))
+    if not name:
+        try:
+            name = basename(os.getcwd())
+        except OSError:
+            pass
+    return truncate(normalize(name), 64) or "unknown-project"
+
+
+# Conservative heuristics, NOT a general secret/business-data classifier.
+# Reject the whole excerpt on recognizable code, credentials, URLs or full paths.
+_SENSITIVE = re.compile(
+    r"```|~~~|`|https?://|[A-Za-z]:[\\/]|\\\\|(?:^|[\s(\[\"'])/(?:\S+)"
+    r"|(?:^|\n)(?:diff --git |@@ |[+-]{3} |\s*(?:def |class |import |from \S+ import |function |const |let |SELECT |INSERT ))"
+    r"|\b(?:api[_ -]?key|access[_ -]?token|token|password|passwd|secret|authorization)\b\s*[:=]"
+    r"|\bBearer\s+\S+|\b(?:sk-|gh[pousr]_|github_pat_|ntfy_)[A-Za-z0-9_-]{8,}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[A-Z0-9]{16}\b",
+    re.IGNORECASE,
+)
+
+
+def private_text(text: str, secrets: tuple[str, ...]) -> bool:
+    cleaned = normalize(text)
+    return bool(_SENSITIVE.search(text) or _SENSITIVE.search(cleaned)) or any(
+        secret and (secret in text or secret in cleaned) for secret in secrets
+    )
+
+
+def build_summary(value: object, limit: int, secrets: tuple[str, ...] = ()) -> str:
+    if limit == 0:
+        return DEFAULT_SUMMARY
+    if not isinstance(value, str) or private_text(value, secrets):
+        value = DEFAULT_SUMMARY
+    return truncate(normalize(value) or DEFAULT_SUMMARY, limit)
+
+
+def build_notification(event: dict, config: Config) -> Notification:
+    secrets = (config.ntfy.topic, config.ntfy.token)
+    device = normalize(config.device)
+    if private_text(device, secrets):
+        device = "unknown-device"
+    project = project_name(event)
+    if private_text(project, secrets):
+        project = "unknown-project"
+    summary = build_summary(event.get("last-assistant-message"), config.summary_max, secrets)
+    return Notification(
+        title=f"Codex complete · {truncate(device, 64) or 'unknown-device'}",
+        message=f"Project: {project}\nStatus: completed\nSummary: {summary}",
+    )
+
+
+def send_notification(config: Config, notification: Notification) -> None:
+    if config.provider != "ntfy":
+        raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
+    ntfy.send_notification(config.ntfy, notification)
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("codex-notify: expected one event JSON argument", file=sys.stderr)
+        return 2
+    try:
+        event = parse_event(sys.argv[1])
+    except ValueError as exc:
+        print(f"codex-notify: {exc}", file=sys.stderr)
+        return 2
+    if not is_supported_event(event):
+        return 0
+    try:
+        config = load_config()
+        send_notification(config, build_notification(event, config))
+    except ConfigurationError as exc:
+        print(f"codex-notify: {exc}", file=sys.stderr)
+        return 2
+    except ProviderError as exc:
+        print(f"codex-notify: {exc}", file=sys.stderr)
+        # Best effort: a push outage must not look like a failed Codex turn.
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

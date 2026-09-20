@@ -1,6 +1,5 @@
 # Local configuration / secrets
-.env
-.env.*
+.env*
 !.env.example
 
 # Python
