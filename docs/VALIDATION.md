@@ -215,10 +215,13 @@ confirms safe fallback labels, omitted sensitive task names and one dispatch
 without exposing the fake value. Compilation, Python 3.10 AST compatibility and
 `git diff --check` passed. No real notification was sent by these tests.
 
-The previously confirmed Windows/Xiaomi metadata-only receipt remains the device
-baseline. One final real turn receipt after this correction is pending user
-confirmation; do not infer phone receipt from offline tests or CI. Broader device
-acceptance remains limited to the evidence in the checklist below.
+The correction was published as `d3711a6`; all four Windows/macOS x Python
+3.10/3.13 CI jobs [passed](https://github.com/xuqiang97/codex-notify/actions/runs/35868779739).
+The user subsequently confirmed that the real turn notification still arrived
+normally on Xiaomi. This completes the final receipt check for the current
+Windows machine. Exact latency/count and lock-screen/network variations were
+not newly measured. The local Windows-to-Xiaomi use case is accepted and enters
+maintenance; broader device acceptance remains limited to the checklist below.
 
 ## Real-environment acceptance checklist
 
@@ -231,7 +234,7 @@ to the evidence.
 
 | Environment | Required evidence | Status |
 | --- | --- | --- |
-| Windows machine A → ntfy → Xiaomi/Android | Manual smoke; real Codex completed turn; exactly one notification | Baseline passed; final metadata-only real receipt confirmed by user, without a new latency/count measurement |
+| Windows machine A → ntfy → Xiaomi/Android | Manual smoke; real Codex completed turn; exactly one notification | Baseline passed; real receipt after the final metadata privacy correction confirmed by user, without a new latency/count measurement |
 | Windows machine B → same personal topic | Distinct device alias; no source changes | Pending |
 | macOS → ntfy → iPhone | Manual smoke; real Codex completed turn; exactly one notification | Receipt reported on 2026-09-20; exact count/latency pending |
 | Two users with different topics | No cross-user receipt | Pending |
