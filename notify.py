@@ -162,7 +162,7 @@ def project_name(event: dict, secrets: tuple[str, ...] = ()) -> str:
 _SENSITIVE = re.compile(
     r"```|~~~|`|https?://|[A-Za-z]:[\\/]|\\\\|(?:^|[\s(\[\"'])/(?:\S+)"
     r"|(?:^|\n)(?:diff --git |@@ |[+-]{3} |\s*(?:def |class |import |from \S+ import |function |const |let |SELECT |INSERT ))"
-    r"|\b(?:api[_ -]?key|access[_ -]?token|token|password|passwd|secret|authorization)\b\s*[:=]"
+    r"|\b(?:api[_ -]?key|access[_ -]?token|token|password|passwd|secret|authorization)\b[\"']?\s*[:=]"
     r"|\bBearer\s+\S+|\b(?:sk-|gh[pousr]_|github_pat_|ntfy_)[A-Za-z0-9_-]{8,}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[A-Z0-9]{16}\b",
     re.IGNORECASE,

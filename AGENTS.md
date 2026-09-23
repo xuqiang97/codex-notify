@@ -367,7 +367,7 @@ Prefer Python standard-library HTTP support such as `urllib.request` unless ther
 
 Use a finite timeout. The notification hook must not hang indefinitely because a network endpoint is unavailable.
 
-Do not send oversized messages. ntfy documents a normal message limit of 4,096 bytes; V1 summaries should be far smaller than that.
+Do not send oversized messages. ntfy documents a normal message limit of 4,096 bytes; V1 notification bodies should be far smaller than that.
 
 ## 11. Failure behavior
 

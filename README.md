@@ -308,7 +308,8 @@ apply; they cannot detect arbitrary confidential prose.
   Both Windows and POSIX paths work. Project/device labels are capped at 64
   characters; task names at 80. Whitespace is normalized and Unicode preserved.
 - Metadata labels retain conservative pattern checks for recognizable paths,
-  URLs, code/credential markers and the configured topic/token. These checks are
+  URLs, code/credential markers (including quoted JSON credential keys) and the
+  configured topic/token. These checks are
   **not a guarantee against arbitrary confidential prose or unknown credentials**.
   Keep device/project labels non-sensitive and leave task names disabled when
   their disclosure is inappropriate. Removing reply previews does not anonymize

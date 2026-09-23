@@ -199,6 +199,27 @@ metadata-only format, with task names enabled locally. Exact latency and count
 were not newly measured, and lock-screen/network variations were not repeated.
 No original notification text, real task name, topic or token is recorded here.
 
+## Final metadata privacy correction (2026-09-23)
+
+A read-only audit reproduced a remaining metadata-filter gap using fake data:
+quoted credential keys such as `{"password":"private-fixture"}` could appear in
+device/project/task labels. The shared check now accepts a closing single or
+double quote before the credential separator. This is a narrow correction to
+the existing heuristic, not a general confidential-content classifier; reply
+previews remain absent and task names remain opt-in.
+
+Windows/Python 3.14.6: **79 offline tests passed**, including regression checks
+for quoted keys, whitespace/case variations, normalization, ordinary task names
+and all three metadata fields before truncation. A mocked event-to-HTTP check
+confirms safe fallback labels, omitted sensitive task names and one dispatch
+without exposing the fake value. Compilation, Python 3.10 AST compatibility and
+`git diff --check` passed. No real notification was sent by these tests.
+
+The previously confirmed Windows/Xiaomi metadata-only receipt remains the device
+baseline. One final real turn receipt after this correction is pending user
+confirmation; do not infer phone receipt from offline tests or CI. Broader device
+acceptance remains limited to the evidence in the checklist below.
+
 ## Real-environment acceptance checklist
 
 No personal topic or phone subscription was available to the initial implementation

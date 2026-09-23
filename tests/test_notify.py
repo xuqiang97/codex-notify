@@ -83,6 +83,25 @@ class EventTests(OfflineTest):
             self.assertIn("one event JSON", error)
             send.assert_not_called()
 
+    def test_quoted_credentials_in_metadata_fall_back_without_skipping_push(self):
+        # Fake labels only; check the actual HTTP body without sending it.
+        for prefix in ("", "x" * 55, "x" * 100):
+            with self.subTest(prefix_length=len(prefix)):
+                label = prefix + '{"password":"private-fixture"}'
+                values = dict(VALUES, CODEX_NOTIFY_DEVICE=label, CODEX_NOTIFY_TASK_TITLE="1")
+                event = {"type": "agent-turn-complete", "cwd": "/work/" + label}
+                with patch("notify.lookup_task_title", return_value=label):
+                    result, error, send = self.invoke([json.dumps(event)], values)
+                self.assertEqual((result, error), (0, ""))
+                send.assert_called_once()
+                config, notification = send.call_args.args
+                request = notify.ntfy.build_request(config, notification)
+                body = json.loads(request.data)
+                self.assertEqual(body["title"], "Codex · 本轮已结束")
+                self.assertEqual(body["message"],
+                                 "设备：unknown-device\n项目：unknown-project\n状态：本轮已结束")
+                self.assertNotIn("private-fixture", request.data.decode("utf-8"))
+
     def test_invalid_payloads_are_safe(self):
         for raw in ("private malformed input", "[]", "null", "42", '"text"', "[" * 2000):
             with self.subTest(raw=raw[:20]):
@@ -348,6 +367,19 @@ class ContentTests(OfflineTest):
         for value in fixtures:
             with self.subTest(value=value[:30]):
                 self.assertTrue(notify.private_text(value, ()))
+
+    def test_quoted_credential_keys_are_private_metadata(self):
+        for key in ("password", "passwd", "secret", "token", "authorization",
+                    "api_key", "API-KEY", "api key", "access_token", "access-token"):
+            for quote in ('"', "'"):
+                for separator in (":", " = ", " \n : "):
+                    value = "{" + quote + key + quote + separator + quote + "private-fixture" + quote + "}"
+                    with self.subTest(key=key, quote=quote, separator=separator):
+                        self.assertTrue(notify.private_text(value, ()))
+        self.assertTrue(notify.private_text('{"pass\x00word"\u202e: "private-fixture"}', ()))
+        for label in ("修复 password 校验", 'Review "token" handling', "普通任务名称"):
+            with self.subTest(label=label):
+                self.assertFalse(notify.private_text(label, ()))
 
     def test_prompts_thread_ids_unknown_fields_and_reply_are_not_sent(self):
         with patch("notify.read_env", return_value={}):
