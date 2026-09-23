@@ -20,6 +20,10 @@ The initial real-world environment is:
 
 The project is intentionally small. Do not turn it into a general workflow engine, daemon, remote-control system, or full observability platform.
 
+The current Windows-to-Xiaomi setup has completed local acceptance and is in
+maintenance. Preserve the working behavior. This does not imply every device in
+section 15 has been validated; use `docs/VALIDATION.md` for actual evidence.
+
 ## 2. Authoritative V1 decisions
 
 These decisions are already approved. Do not silently replace them during implementation.
@@ -150,6 +154,8 @@ root. Compare path components, not string prefixes, using Windows/POSIX path
 semantics. Missing/invalid/outside `cwd` is a silent successful skip; do not use
 process cwd to bypass this explicit scope. Reject relative roots and `..`.
 This is a lexical notification scope, not a filesystem security boundary.
+It does not normalize Windows extended paths (`\\?\D:\...`) to ordinary drive
+paths; mixed forms may not match. Default `[]` avoids directory-based exclusions.
 
 This opt-in handles observed desktop internal-task noise without guessing from
 assistant JSON, hexadecimal directory names, prompt text or undocumented source
@@ -267,30 +273,35 @@ Provide only safe templates such as `.env.example`.
 
 ## 8. Configuration contract
 
-The exact implementation may be refined, but V1 should support environment-based configuration with safe defaults.
+V1 supports process-environment configuration and an optional `.env` file beside
+`notify.py`, using the standard-library parser already implemented in the core.
 
-Recommended variables:
+Supported sender settings (see README for value constraints):
 
 ```text
 CODEX_NOTIFY_PROVIDER=ntfy
 NTFY_SERVER=https://ntfy.sh
 NTFY_TOPIC=<high-entropy-topic>
+NTFY_TOKEN=
 CODEX_NOTIFY_DEVICE=<optional-friendly-device-name>
+CODEX_NOTIFY_TASK_TITLE=0
 CODEX_NOTIFY_TIMEOUT=5
 CODEX_NOTIFY_PROJECT_ROOTS=[]
 ```
 
-Configuration precedence should be simple and documented.
+Preserve this configuration precedence:
 
-A reasonable V1 policy is:
-
-1. operating-system environment variables;
-2. optional local `.env` file if implemented;
+1. environment variables inherited by the sender process;
+2. optional `.env` beside the sender script;
 3. hard-coded safe defaults for non-secret values.
 
-If `.env` support is added, `.env` must be ignored by Git.
+Explicitly empty environment values override the file. Never read the working
+project's `.env` instead. Missing sender `.env` is allowed; malformed syntax is
+a configuration error even if environment variables provide the needed values.
+Keep `.env` Git-ignored and preserve it when updating an existing installation.
 
-Do not require a third-party dotenv package unless there is a strong reason. A tiny, well-tested parser is acceptable, or the project may simply document how to set environment variables.
+The parser handles literal `KEY=value`, matching quotes, blank lines and full-line
+comments. Do not silently add interpolation, shell execution or a dotenv dependency.
 
 The required secret-like value is `NTFY_TOPIC`. If it is missing, do not send anything; report a clear local configuration error.
 
@@ -298,23 +309,20 @@ The required secret-like value is `NTFY_TOPIC`. If it is missing, do not send an
 
 ntfy is the only provider required for V1, but the code must not entangle event parsing, message construction, and ntfy HTTP details.
 
-A lightweight structure is preferred.
-
-For example:
+Preserve the current lightweight boundaries:
 
 ```text
 notify.py
+task_metadata.py
 providers/
   __init__.py
   ntfy.py
 ```
 
-or an equivalently simple functional boundary.
-
-The core should conceptually call something like:
+The core dispatches a provider-neutral notification through:
 
 ```python
-send_notification(title, message, metadata)
+send_notification(config, notification)
 ```
 
 Provider-specific code owns:
@@ -332,6 +340,9 @@ Core code owns:
 - metadata label normalization;
 - privacy rules;
 - provider selection.
+
+`task_metadata.py` owns only the optional bounded task-title lookup. Provider-neutral
+`Notification`, `ConfigurationError` and `ProviderError` live in `providers/__init__.py`.
 
 Do not build a plugin framework with dynamic package loading for V1.
 
@@ -353,7 +364,9 @@ Official references:
 - https://docs.ntfy.sh/publish/
 - https://github.com/binwiederhier/ntfy
 
-Prefer HTTPS.
+Require HTTPS with certificate verification enabled. Accept only a server origin
+(optional port, no credentials, non-root path, query or fragment). Never follow
+redirects, including same-host redirects.
 
 The implementation should support the hosted default:
 
@@ -363,11 +376,16 @@ https://ntfy.sh
 
 but the server URL must be configurable so a future self-hosted server can be used without rewriting the core.
 
-Prefer Python standard-library HTTP support such as `urllib.request` unless there is a compelling reason to add `requests`.
+The provider uses standard-library `urllib.request` to POST a UTF-8 JSON envelope
+to the server root, containing topic, title, message, normal priority `3` and only
+the `computer` tag. Optional bearer authentication belongs in the header.
 
-Use a finite timeout. The notification hook must not hang indefinitely because a network endpoint is unavailable.
+Use both the configured socket timeout and bounded total delivery wait (default
+5 seconds, greater than 0 and at most 30). The short-lived daemon worker bounds
+the sender process lifetime; it is not a persistent background service.
 
-Do not send oversized messages. ntfy documents a normal message limit of 4,096 bytes; V1 notification bodies should be far smaller than that.
+Bound the complete outgoing JSON envelope to 4,096 bytes, as the implementation
+already does. Do not add attachments or send the raw event.
 
 ## 11. Failure behavior
 
@@ -379,10 +397,17 @@ Requirements:
 - catch expected network errors;
 - print concise diagnostics to stderr;
 - do not expose credentials in error messages;
-- avoid unbounded retries;
+- make one publish attempt per eligible invocation, without retries;
 - never block indefinitely.
 
-A single retry with a short delay is acceptable, but not required for the first implementation.
+Preserve the existing exit behavior:
+
+- `0`: successful publish, unsupported event, explicit scope skip or caught provider failure;
+- `2`: malformed/missing input or invalid/missing required configuration.
+
+Provider failures produce a short sanitized stderr diagnostic. Exit `0` alone
+does not prove delivery. On timeout delivery is unknown; do not add automatic
+retries or promise exactly-once delivery. There is no deduplication store.
 
 Tests must cover provider failure.
 
@@ -507,7 +532,7 @@ External Codex `notify` currently supports `agent-turn-complete`; do not pretend
 
 ## 17. Implementation workflow for coding agents
 
-When asked to implement V1:
+When implementing or changing runtime behavior:
 
 1. Read this file completely.
 2. Read `docs/IMPLEMENTATION.md`.
@@ -531,6 +556,10 @@ When behavior changes:
 - update README for end-user setup;
 - update this file if agent constraints change;
 - update `docs/DECISIONS.md` when a product/architecture decision changes;
-- update `docs/IMPLEMENTATION.md` when acceptance criteria or implementation sequencing changes.
+- update `docs/IMPLEMENTATION.md` when implementation boundaries or acceptance requirements change.
 
 Do not leave documentation describing an architecture that the code no longer follows.
+For documentation-only edits, validate changed examples, links and the Git diff;
+unchanged runtime code does not require another manual phone test. Keep detailed
+test results and receipt evidence in `docs/VALIDATION.md`, including their dates
+and limits, instead of duplicating changing test counts throughout the docs.

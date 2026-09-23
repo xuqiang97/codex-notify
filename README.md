@@ -6,10 +6,11 @@ Send a concise Codex completion notification to Android or iPhone:
 Codex official notify -> notify.py -> HTTPS ntfy -> Android / iPhone
 ```
 
-**Windows/Xiaomi delivery has been user-verified; full V1 device acceptance is
-still pending.** See [validation details](docs/VALIDATION.md) for scope and dates. The sender
+**The current Windows-to-Xiaomi setup is accepted and in maintenance; full V1
+cross-device acceptance still has pending checks.** See
+[validation details](docs/VALIDATION.md) for scope and dates. The sender
 uses Python 3.10+ and the standard library only. It handles `agent-turn-complete`,
-with one publish attempt per invocation. There is no daemon, polling, AI summary
+with one publish attempt per invocation. There is no background service, polling, AI summary
 API, remote approval, or remote control. “Completed” means the Codex turn ended;
 it does not assert that the task or its tests succeeded.
 
@@ -93,6 +94,10 @@ Codex process actually inherits it and restart Codex after changing its environm
 
 ### Limit notifications to your projects
 
+Keep the default `CODEX_NOTIFY_PROJECT_ROOTS=[]` unless you deliberately need
+directory restrictions. It allows ordinary projects and managed worktrees in any
+location; a nonempty list can silently exclude legitimate tasks elsewhere.
+
 Desktop background tasks can also produce completion events. In Windows testing,
 a background suggestion task produced a notification labeled with a Codex runtime
 folder and a JSON reply. To exclude directories outside your projects, set a
@@ -115,6 +120,9 @@ worktree locations explicitly if you want notifications from them. The root itse
 and its descendants match; `D:/Projects-old` does not match `D:/Projects`.
 Windows paths compare without case, POSIX paths with case, independent of the OS
 running the sender. This lexical check does not resolve filesystem symlinks.
+It also does not normalize Windows extended paths: an event cwd such as
+`\\?\D:\Projects\demo` does not match the ordinary root `D:/Projects`.
+This restriction does not apply when scope is `[]`.
 
 With a nonempty scope, missing, invalid, relative, parent-traversing or outside
 event `cwd` skips silently with exit code zero. Process cwd is not a fallback for
@@ -353,9 +361,26 @@ The worker observes the same timeout and safe error handling through a proxy.
 Changing `NTFY_SERVER` to a self-hosted origin is supported, but deployment and
 iOS push forwarding configuration are outside V1; follow ntfy's server docs.
 
+## Updating an existing installation
+
+Keep the sender at the path referenced by your user-level hook. Before updating,
+check `git status --short` and keep a private backup of `.env` outside the
+repository. With a clean working tree, use `git pull --ff-only`; if Git reports
+divergence or local changes, resolve them rather than force-resetting the clone.
+Do not copy `.env.example` over an existing `.env`. Review template changes and
+merge only needed settings, preserving your private topic and device alias.
+
+The next hook invocation uses the updated script and `.env`. After moving the
+repository, replacing Python, changing hook configuration or updating the desktop
+app, check the actual executable paths and confirm a real completed turn reaches
+the phone. Preserve any existing desktop hook wrapper as described above. Restart
+Codex after changing its hook or inherited environment. Documentation-only updates
+do not require another phone test; repeat relevant device checks when behavior or
+the environment changes, or when delivery becomes abnormal.
+
 ## Development and validation
 
-Read [AGENTS.md](AGENTS.md), [implementation contract](docs/IMPLEMENTATION.md) and
+Read [AGENTS.md](AGENTS.md), [implementation details](docs/IMPLEMENTATION.md) and
 [accepted decisions](docs/DECISIONS.md) before editing. Core event/config/content
 logic lives in `notify.py`; transport is in `providers/ntfy.py`, with provider-neutral
 types in `providers/__init__.py`. Optional task-title lookup is isolated in

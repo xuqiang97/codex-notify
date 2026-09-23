@@ -1,450 +1,194 @@
-# V1 Implementation Plan
+# V1 Implementation and Maintenance
 
-This document turns the approved architecture into an executable implementation plan for the next coding agent.
+This document describes the implemented sender and the boundaries to preserve
+during maintenance. Read [AGENTS.md](../AGENTS.md) first; it is the implementation
+contract. [DECISIONS.md](DECISIONS.md) records accepted design choices and their
+history. [README](../README.md) owns setup instructions and configuration examples;
+[VALIDATION.md](VALIDATION.md) owns dated test results and device acceptance.
 
-Read `AGENTS.md` first. If this file and `AGENTS.md` conflict, follow `AGENTS.md`.
+The current Windows-to-Xiaomi installation is accepted and in maintenance.
+Other devices and untested conditions retain their separate acceptance checks.
+No new provider, service, workflow engine or preview feature is needed to use
+the accepted installation.
 
-Implementation status: the Python/ntfy sender, local configuration, offline tests
-and user setup instructions now exist. The sections below retain the approved
-V1 plan and acceptance contract. See [VALIDATION.md](VALIDATION.md) for executed
-software checks and remaining real-device acceptance; see [README](../README.md)
-for the final configuration and commands.
-
-Follow-up: project-first notification titles and optional task-name metadata are
-implemented per Decision 014. Task-title lookup is a bounded read of an existing
-local index, disabled by default. Validate exact-thread matching, safe fallback,
-privacy filtering and metadata-only operation; no transcript access or
-additional service is introduced. Current content examples are in README.
-
-Presentation follow-up (Decisions 016/017): use neutral turn-ended wording and
-Chinese metadata labels; keep only the computer tag. Reply previews and their
-configuration have been removed. Verify that all reply/input content is ignored,
-even with legacy preview settings, and missing task metadata never prevents a
-notification. Task names remain opt-in; enable them only with user consent.
-
-Windows follow-up (2026-09-23): add the optional project scope in Decision 015
-and check project-label privacy before truncation. Verify allowed/outside/missing
-event cwd, path-component boundaries on Windows/POSIX/UNC, environment precedence,
-and preservation of normal JSON replies. Capture the 2026-09-22 Windows/Xiaomi
-receipt reports separately from post-change regression and broader pending device
-acceptance. Preserve an existing desktop Computer Use notify wrapper when setting
-up the user-level hook; see README for the version-specific chained form.
-
-## 1. Goal
-
-Deliver the smallest reliable V1 that turns a real Codex `agent-turn-complete` event into a concise mobile notification through ntfy.
-
-The same implementation must work on Windows and macOS.
-
-## 2. Suggested implementation shape
-
-Preferred starting structure:
+## 1. Files and responsibilities
 
 ```text
 codex-notify/
-├── notify.py
+├── notify.py                 # CLI, config, scope, metadata and dispatch
+├── task_metadata.py          # Optional bounded task-title lookup
 ├── providers/
-│   ├── __init__.py
-│   └── ntfy.py
-└── tests/
-    └── test_notify.py
+│   ├── __init__.py           # Notification and error types
+│   └── ntfy.py               # Provider config, HTTPS request and deadline
+├── scripts/smoke_test.py     # Explicit manual publish, never an offline test
+├── tests/                   # Offline unittest suite
+└── .env.example             # Safe template; actual .env is private
 ```
 
-Do not create extra layers unless the implementation genuinely benefits from them.
-
-A single-file implementation is acceptable only if event logic and provider HTTP logic remain clearly separated and testable.
-
-## 3. Step 1 — Parse the Codex event
-
-`notify.py` should expose a testable function for payload parsing.
-
-Expected runtime invocation model:
-
-```text
-python notify.py "<json-payload>"
-```
-
-The first CLI argument is the Codex notification JSON.
-
-Minimum behavior:
-
-- no argument -> concise stderr message, no network call;
-- invalid JSON -> concise stderr message, no network call;
-- event type other than `agent-turn-complete` -> clean no-op;
-- valid completion event -> continue.
-
-Suggested internal model:
-
-```python
-def parse_event(raw: str) -> dict:
-    ...
-
-def is_supported_event(event: dict) -> bool:
-    ...
-```
-
-Do not crash on unknown fields.
-
-## 4. Step 2 — Load local configuration
-
-Required configuration:
-
-```text
-CODEX_NOTIFY_PROVIDER=ntfy
-NTFY_SERVER=https://ntfy.sh
-NTFY_TOPIC=<random-private-topic>
-```
-
-Optional configuration:
-
-```text
-CODEX_NOTIFY_DEVICE=<friendly-device-name>
-CODEX_NOTIFY_TIMEOUT=5
-```
-
-Recommended defaults:
-
-- provider: `ntfy`;
-- server: `https://ntfy.sh`;
-- device: hostname;
-- timeout: `5` seconds.
-
-`NTFY_TOPIC` has no default.
-
-### Optional .env support
-
-If implemented, use this precedence:
-
-```text
-OS environment > local .env > safe code defaults
-```
-
-Rules:
-
-- `.env` is local-only and ignored by Git;
-- do not require `python-dotenv` unless clearly justified;
-- parser does not need advanced shell interpolation;
-- blank lines and `#` comments should be safe;
-- do not log secrets.
-
-If .env support is omitted in the first coding pass, README must clearly explain how to set environment variables on Windows and macOS.
-
-## 5. Step 3 — Derive device and project metadata
-
-### Device
-
-Use:
-
-1. `CODEX_NOTIFY_DEVICE` when configured;
-2. otherwise `socket.gethostname()`.
-
-### Project
-
-Goal: show only a friendly project/folder name.
-
-Possible algorithm:
-
-1. inspect the event for a working-directory-like field if one exists;
-2. otherwise inspect the process working directory;
-3. extract the final directory basename;
-4. fallback to `unknown-project`.
-
-Important:
-
-- tolerate both Windows and POSIX path shapes even when tests execute on only one OS;
-- never publish the complete absolute path by default.
-
-Implementation may use `PureWindowsPath` / `PurePosixPath` or another well-tested strategy.
-
-## 6. Step 4 — Exclude conversation content
-
-Only select event metadata needed for completion status, project and optional
-task-name lookup. Do not use `last-assistant-message` or `input-messages` in any
-outgoing text. Reply previews, summary limits and generic reply fallbacks were
-removed in Decision 017; obsolete settings cannot restore them. No AI call,
-conversation export, transcript scan or reply-content classifier is needed.
-
-## 7. Step 5 — Build the notification model
-
-Keep a small provider-neutral model, e.g.:
-
-```python
-title: str
-message: str
-metadata: dict[str, str]
-```
-
-Suggested user-facing content:
-
-```text
-Title:
-my-app · 本轮已结束
-
-Message:
-设备：Laptop-A
-项目：my-app
-状态：本轮已结束
-```
-
-The exact text may be polished, but the required information is:
-
-- device;
-- project;
-- completed status;
-- optional task name.
-
-Avoid adding timestamps unless they provide clear value; the phone notification already has delivery time.
-
-## 8. Step 6 — Implement the ntfy provider
-
-Use ntfy's official HTTP publish API.
-
-Reference:
-
-- https://docs.ntfy.sh/publish/
-
-Requirements:
-
-- HTTPS;
-- configurable server;
-- configurable topic;
-- finite timeout;
-- UTF-8;
-- concise title and message;
-- no real topic in source code;
-- expected network errors are caught.
-
-The implementation may use ntfy's JSON publish API or topic endpoint. Choose the form that produces the cleanest standard-library implementation.
-
-Suggested fields, where useful:
-
-- topic;
-- title;
-- message;
-- tags such as completion/computer;
-- normal/default priority.
-
-Do not use attachments in V1.
-
-Do not send the raw Codex event to ntfy.
-
-## 9. Step 7 — Add provider dispatch
-
-V1 only needs `ntfy`.
-
-The dispatcher should still make the boundary explicit.
-
-Example concept:
-
-```python
-def send_notification(config, notification) -> None:
-    if config.provider == "ntfy":
-        send_ntfy(...)
-    else:
-        raise ConfigurationError(...)
-```
-
-Do not implement Pushover/ServerChan yet.
-
-Unknown provider values should produce a clear local configuration error.
-
-## 10. Step 8 — Graceful error handling
-
-Expected errors:
-
-- missing CLI payload;
-- invalid JSON;
-- missing topic;
-- unsupported provider;
-- URL/network failure;
-- timeout;
-- non-success HTTP response.
-
-Behavior:
-
-- no raw secret output;
-- no huge traceback for expected failures;
-- short stderr diagnostic;
-- terminate promptly.
-
-Unexpected programming errors may remain visible during development, but user-facing expected failures should be controlled.
-
-## 11. Step 9 — Automated tests
-
-Prefer standard-library `unittest`.
-
-Network calls must be mocked.
-
-Minimum test matrix:
-
-| Area | Case |
-|---|---|
-| Event | valid agent-turn-complete |
-| Event | unsupported event ignored |
-| Event | missing argument |
-| Event | invalid JSON |
-| Event | missing optional fields |
-| Config | missing topic |
-| Config | custom device name |
-| Config | hostname fallback |
-| Project | Windows-style path |
-| Project | POSIX-style path |
-| Metadata | Unicode |
-| Metadata | whitespace normalization |
-| Metadata | truncation |
-| Privacy | input-messages and last-assistant-message never pushed |
-| Privacy | obsolete preview configuration cannot restore content |
-| Provider | expected ntfy URL/body/headers |
-| Provider | timeout |
-| Provider | HTTP/network failure |
-| Dispatch | unsupported provider |
-
-Tests must not require internet access.
-
-Suggested command:
-
-```bash
-python -m unittest discover -v
-```
-
-If another test runner is introduced, document why.
-
-## 12. Step 10 — Manual ntfy smoke test
-
-After unit tests pass, perform an optional manual provider test with a disposable/private topic.
-
-Goal:
-
-```text
-local Python -> ntfy.sh -> phone
-```
-
-Verify:
-
-- Android receives notification;
-- iPhone receives notification;
-- title is readable;
-- device is identifiable;
-- project is identifiable;
-- no reply/input excerpt is present;
-- Unicode is rendered correctly.
-
-Do not commit the test topic afterward.
-
-## 13. Step 11 — Real Codex integration test
-
-Configure the user-level Codex config.
-
-### Windows example
-
-```toml
-notify = [
-  "python",
-  "C:\\Users\\you\\path\\codex-notify\\notify.py"
-]
-```
-
-### macOS example
-
-```toml
-notify = [
-  "python3",
-  "/Users/you/path/codex-notify/notify.py"
-]
-```
-
-Then run a short but real Codex task and confirm:
-
-1. Codex completes;
-2. `notify.py` is invoked;
-3. exactly one completion notification is published;
-4. the correct phone receives it;
-5. another user's topic does not receive it.
-
-## 14. Step 12 — Multi-machine test
-
-Developer A should test both Windows machines using the same personal topic but different device names.
-
-Expected phone notifications should make the source obvious, e.g.:
-
-```text
-设备：ThinkBook-A
-```
-
-and
-
-```text
-设备：ThinkBook-B
-```
-
-Developer B should use a different topic on macOS.
-
-No source-code change should be required between these configurations.
-
-## 15. Xiaomi/Android practical test
-
-Because Android vendor background policies can affect delivery, perform practical tests on the Xiaomi device:
-
-- app foreground;
-- app background;
-- phone locked;
-- several minutes after lock;
-- Wi-Fi;
-- mobile network if practical.
-
-If needed, document Xiaomi/HyperOS notification, autostart, and battery-exemption settings in README.
-
-Do not preemptively add a second provider before real testing.
-
-## 16. iPhone practical test
-
-On iPhone verify:
-
-- ntfy App Store client can subscribe to the user's private topic;
-- lock-screen delivery;
-- background delivery;
-- notification content formatting.
-
-If iOS delivery is materially worse in practice, record evidence before proposing a provider change.
-
-## 17. Documentation work required with implementation
-
-The coding agent must update README from “planned” to “working” instructions after code exists.
-
-README should then include:
-
-- prerequisites;
-- clone instructions;
-- ntfy app install/subscription guidance;
-- topic generation guidance;
-- local config setup;
-- Windows Codex config;
-- macOS Codex config;
-- manual test command;
-- troubleshooting;
-- privacy/security notes.
-
-Keep `AGENTS.md` focused on contributor/agent rules, not end-user onboarding.
-
-## 18. V1 definition of done
-
-Do not call V1 complete until:
-
-- implementation exists;
-- automated tests pass;
-- no real secrets are committed;
-- Windows integration works;
-- macOS integration works;
-- Android notification works;
-- iPhone notification works;
-- README matches reality;
-- public API/provider boundaries remain simple;
-- known limitations are documented.
-
-## 19. Expected first implementation commit summary
-
-A good implementation should be explainable roughly as:
-
-> Implement cross-platform Codex completion notifications using Python and ntfy, with privacy-conscious message formatting, local configuration, provider separation, and offline unit tests.
-
-If the implementation becomes much harder to summarize than this, reassess whether V1 has become over-engineered.
+The code uses Python 3.10+ and the standard library. The shared Windows/macOS
+implementation does not require an OS shell, GUI API or third-party package.
+Keep event/content logic separate from provider transport; optional title lookup
+does not introduce a database or a task-history service.
+
+## 2. Invocation and event flow
+
+Codex invokes the user-level `notify` command with exactly one event JSON argument.
+`main()` parses a JSON object, then checks `type == "agent-turn-complete"` before
+loading configuration. Unsupported events return cleanly without publishing.
+Unknown fields are tolerated; missing optional metadata uses safe fallbacks.
+
+For a supported event, the sender:
+
+1. Loads local configuration.
+2. Applies optional project scope using the event's `cwd`.
+3. Builds device/project/optional task metadata with privacy checks.
+4. Dispatches the `Notification` through `send_notification(config, notification)`.
+5. Returns the defined exit code, with sanitized diagnostics for expected errors.
+
+`last-assistant-message` and `input-messages` are never used to build, name or
+classify notifications. No reply preview, summary builder, generic reply fallback
+or re-enable setting remains (Decision 017). Legacy `CODEX_NOTIFY_SUMMARY_MAX`
+values are ignored; the surrounding dotenv syntax must still be valid.
+
+## 3. Configuration and project scope
+
+Precedence is **sender process environment > `.env` beside `notify.py` > defaults**.
+An explicitly empty environment value overrides the file. Missing `.env` permits
+environment-only configuration; malformed syntax remains a local error. Never
+read an unrelated working project's `.env` or expose topic/token values in errors.
+
+The parser reads literal `KEY=value` lines, matching quotes, blank lines and
+full-line comments, with UTF-8 BOM/CRLF support. It does not execute, interpolate
+or unescape values. The last duplicate key wins. README and `.env.example` define
+the supported sender settings; do not overwrite existing private configuration
+with the template during an update.
+
+`CODEX_NOTIFY_PROJECT_ROOTS=[]` leaves scope unrestricted. A nonempty array allows
+only a valid absolute event `cwd` equal to or beneath a root. Missing/invalid/
+outside cwd skips silently; process cwd never bypasses an explicit scope. Relative
+roots and parent traversal are rejected. Compare path components with Windows or
+POSIX semantics regardless of the host OS.
+
+Scope is lexical, not a security boundary or an internal-task classifier. It does
+not resolve symlinks or normalize Windows extended paths (`\\?\D:\...`) to ordinary
+drive paths. Mixed extended/ordinary forms may be skipped. Projects and worktrees
+outside configured roots are skipped too. Keep scope unrestricted unless the user
+deliberately wants these directory restrictions; background tasks may also notify.
+
+## 4. Metadata and notification construction
+
+| Field | Source and behavior |
+| --- | --- |
+| Device | Configured alias, otherwise hostname; safe `unknown-device` fallback; at most 64 characters |
+| Project | Basename of usable absolute event cwd, otherwise process cwd, then `unknown-project`; at most 64 characters |
+| Task | Optional exact-thread lookup described below; missing/private name is omitted; at most 80 characters |
+| Status | Fixed neutral `本轮已结束`; does not infer success, failure or approval requirements |
+
+Check the complete metadata label before display truncation. The shared check
+recognizes configured topic/token values and obvious credential, code, URL and
+path markers, including quoted credential keys. Normalize whitespace and remove
+unsafe control characters. A rejected device/project label uses its generic
+fallback; a rejected task name is omitted without suppressing the notification.
+These heuristics cannot identify arbitrary confidential prose or unknown secrets.
+Device/project labels must be non-sensitive; task-title disclosure remains opt-in.
+
+The title contains the available project and optional task name, followed by
+`本轮已结束`; if neither is available, it starts with `Codex`. The body contains
+Chinese labels for device, project, optional task and status. Only the computer
+tag is sent. There are no replies, prompts, full paths, raw events or thread/turn
+IDs in the outgoing display content. See README for the exact examples.
+
+### Optional task names
+
+`CODEX_NOTIFY_TASK_TITLE=1` enables a best-effort lookup in the existing local
+`session_index.jsonl`; default `0` avoids the lookup entirely. `task_metadata.py`
+validates the event's UUID-shaped `thread-id` and reads at most the final 1 MiB of
+the index under process-environment `CODEX_HOME` (default `~/.codex`). It searches
+backward for the latest matching ID and uses that record's nonempty `thread_name`.
+An empty latest title does not resurrect an older title.
+
+This index is an internal detail, not a stable public API. Missing, unreadable,
+changed or out-of-tail metadata must fall back without blocking delivery. Stale
+index data can show an older task name. Do not modify the index, read transcripts
+or databases, or extract a task title from prompts. The title itself may contain
+sensitive text, so opting in permits its disclosure subject to the limited checks.
+
+## 5. ntfy transport and failure handling
+
+`providers/ntfy.py` validates the topic, optional bearer token, server and timeout.
+The server must be an HTTPS origin with optional port and no credentials, non-root
+path, query or fragment. The default is `https://ntfy.sh`. Certificate verification
+stays enabled and redirects are rejected, including same-host redirects.
+
+The provider POSTs UTF-8 JSON to the server root with `topic`, `title`, `message`,
+normal `priority: 3` and `tags: ["computer"]`. Optional authentication uses the
+Authorization header. The complete JSON envelope is bounded to 4,096 bytes.
+Responses are closed without reading their bodies; non-2xx status is a failure.
+
+There is one attempt per eligible invocation and no retry. The configured timeout
+(default 5 seconds, greater than 0 and at most 30) bounds both the socket wait and
+the caller's total delivery wait. A daemon worker prevents a stuck resolver or
+slow response headers from holding the CLI process open indefinitely; it is not
+a persistent background service. Process startup/scheduling is outside that wait.
+
+| Outcome | Exit | Diagnostic |
+| --- | --- | --- |
+| Publish completes | `0` | None |
+| Unsupported event or explicit scope skip | `0` | None |
+| Expected provider/network failure or timeout | `0` | Short sanitized stderr message |
+| Missing/malformed input or invalid/missing required configuration | `2` | Short sanitized stderr message |
+
+Do not echo raw events, config values, HTTP response bodies or underlying network
+exception text. Provider failures must not turn a completed Codex turn into an
+apparent task failure. Exit `0` alone is not proof of receipt; timeout leaves
+delivery unknown. There is no deduplication store or exactly-once guarantee.
+
+## 6. Regression and publication checks
+
+For runtime changes, run the full offline suite and compilation checks documented
+in README. Keep coverage for:
+
+- Event parsing, malformed/deep JSON, unsupported events and missing optional fields.
+- Environment precedence, dotenv syntax, invalid configuration and hostname fallback.
+- Windows/POSIX/UNC project names, optional scope, component boundaries and cwd fallback.
+- Unicode, whitespace, truncation and privacy checks before truncation.
+- Task-name opt-in, exact matching, latest rename, bounded index reads and safe fallbacks.
+- No reply/input content in requests or diagnostics, including with obsolete settings.
+- JSON request formation, auth, TLS/network errors, redirect refusal, size and deadlines.
+- CLI invocation from another working directory and paths containing spaces/Unicode.
+
+Automated tests use fake configuration and mock transport; in-process sockets/DNS
+are blocked. Never run the real smoke script as part of test discovery. GitHub
+Actions runs the suite on Windows/macOS with Python 3.10 and 3.13. Verify the
+workflow for the actual published revision rather than citing an older green run.
+
+Inspect the diff and staged files before publishing. Keep `.env`, tokens, topics
+and personal paths out of Git. Documentation-only changes need example/link and
+diff checks; they do not require another manual phone test. Keep detailed results
+in VALIDATION rather than duplicating test counts here.
+
+## 7. Real-device acceptance and maintenance
+
+Follow README for the manual smoke test and user-level Codex hook setup. Use the
+actual Python executable and sender path. Preserve any existing desktop Computer
+Use wrapper; its forwarding mechanism is version-specific. The separate CLI on
+PATH is not evidence of which runtime the desktop app uses.
+
+Acceptance requires phone receipt, not just an HTTP response or exit code. On a
+new installation or a relevant runtime/configuration change, confirm a real Codex
+turn invokes the sender and the intended phone receives the recognizable message.
+Record count/latency only when actually observed; do not infer them from silence
+or successful unit tests. Check background/lock-screen and network conditions as
+needed for the target environment.
+
+The cross-device acceptance contract remains in AGENTS section 15. It includes
+Windows and macOS, Android and iPhone, distinct aliases for two computers sharing
+one personal topic, different users' separate topics, privacy and graceful failure.
+See VALIDATION's checklist for remaining environments and evidence requirements.
+Acceptance of the current Windows installation does not complete that full matrix.
+
+Preserve private configuration and installed paths during updates. Recheck paths
+and actual delivery after app/interpreter/hook changes or reported failures. Do
+not repeat the entire device matrix for ordinary documentation maintenance. Add
+features or providers only when a concrete requirement or observed failure warrants
+reopening an accepted decision.

@@ -4,7 +4,21 @@ Initial implementation validation was performed on 2026-09-20, followed by
 Windows device checks on 2026-09-22 and local corrections on 2026-09-23.
 This is not a claim that all V1 device acceptance criteria have been met.
 
-## Executed locally
+## Current acceptance status (2026-09-23)
+
+The current Windows-to-Xiaomi installation is accepted and in maintenance. The
+user confirmed real phone receipt after the final metadata privacy correction;
+see [the final correction record](#final-metadata-privacy-correction-2026-09-23)
+for its offline checks, published revision and CI evidence. Earlier checks also
+covered a short combined background/lock-screen scenario and the same task in
+local Work mode; these are not blanket guarantees for other environments.
+
+Full cross-device V1 acceptance remains bounded by the
+[real-environment checklist](#real-environment-acceptance-checklist). Historical
+sections below retain the results and limitations of each tested revision; they
+do not describe the current test count or supersede later receipt confirmations.
+
+## Initial implementation: local checks (2026-09-20)
 
 Environment: Apple Silicon (arm64), macOS 26.6.2.
 
@@ -34,7 +48,7 @@ The Windows/macOS × Python 3.10/3.13 GitHub Actions matrix is provided. Its res
 must be checked on GitHub after publishing; local macOS results do not imply a
 Windows runner result.
 
-## Security review scope
+## Initial implementation: security review scope (2026-09-20)
 
 - No actual topic, token or local `.env` was created for this implementation.
 - Configuration examples contain an explicit unusable placeholder; test data
