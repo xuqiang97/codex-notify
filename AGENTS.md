@@ -33,7 +33,7 @@ These decisions are already approved. Do not silently replace them during implem
 7. **Mobile target:** Android and iPhone.
 8. **Repository model:** shared implementation, per-user/per-machine local configuration.
 9. **Secrets:** never commit real ntfy topics, tokens, or credentials.
-10. **Privacy:** notifications are summaries, not conversation exports.
+10. **Privacy:** notifications contain completion metadata, never conversation content.
 11. **Extensibility:** ntfy is the V1 provider, not a permanent hard-coded dependency.
 12. **Complexity:** keep V1 lightweight and easy to clone, configure, understand, test, and maintain.
 13. **Dependencies:** prefer the Python standard library. Add third-party packages only when there is a clear benefit that outweighs setup cost.
@@ -93,7 +93,7 @@ notify.py
   +--> derive metadata
   |      - device name
   |      - project name
-  |      - short completion summary
+  |      - optional task name
   |
   +--> build privacy-conscious notification
   |
@@ -135,7 +135,7 @@ Missing fields must degrade gracefully.
 
 Examples:
 
-- no `last-assistant-message` -> use a generic completion summary;
+- no `last-assistant-message` -> no effect; reply content is never used;
 - no `input-messages` -> do not fail;
 - no known working-directory field -> use a safe fallback for project naming.
 
@@ -164,19 +164,22 @@ Recommended shape:
 
 ```text
 Title:
-<project> · <task name, if enabled and available> · 本轮已完成
+<project> · <task name, if enabled and available> · 本轮已结束
 
 Message:
-Device: <device>
-Project: <project>
-Task: <task name, if enabled and available>
-Status: turn completed
-Summary: <short summary>
+设备：<device>
+项目：<project>
+任务：<task name, if enabled and available>
+状态：本轮已结束
 ```
 
 Exact punctuation may evolve, but the information model should stay compact.
 Completion means the Codex turn ended, not that all work or tests succeeded.
-When `CODEX_NOTIFY_SUMMARY_MAX=0`, omit the summary line.
+Never include reply previews or user-input excerpts, even when legacy preview
+settings are present. There is no preview setting or fallback preview text.
+Use neutral turn-ended wording and only the computer tag, not a success checkmark.
+Preserve the remaining metadata configuration; do not infer success/failure
+or classify background tasks from the reply text.
 
 ### Optional task name
 
@@ -188,8 +191,7 @@ event `thread-id` to look up the latest matching `thread_name` in the existing
 from user prompts. This is best-effort internal metadata, not an official API.
 Missing/unreadable/changed metadata must fall back to project-only notifications.
 Apply privacy checks before truncating the title to 80 characters. The local title
-can itself contain sensitive text: keep this setting independent of summaries
-and document the disclosure when opting in. No new database or history service.
+can itself contain sensitive text: document the disclosure when opting in. No new database or history service.
 
 ### 6.1 Device name
 
@@ -214,22 +216,17 @@ Apply privacy checks to the complete basename before truncating its display labe
 
 Windows and POSIX paths must both be handled correctly.
 
-### 6.3 Summary
+### 6.3 No conversation content
 
-The summary may be based on `last-assistant-message`, but it must be truncated.
+Reply previews have been removed from V1 (Decision 017). Do not read
+`last-assistant-message` or `input-messages` to build, name, classify or decorate
+notifications. The hook can still pass these fields in the event JSON, but only
+completion metadata is selected for the outgoing notification. There is no
+summary builder, preview limit, generic reply fallback or re-enable switch.
 
-Default target: approximately 300 characters.
-
-Requirements:
-
-- preserve Unicode;
-- normalize excessive whitespace;
-- do not send the full assistant response by default;
-- do not include `input-messages` in the outgoing notification by default;
-- do not attempt AI summarization in V1;
-- do not add an OpenAI/API call just to summarize the message.
-
-If no assistant message exists, use a generic message such as `Codex finished the task.`
+Legacy `CODEX_NOTIFY_SUMMARY_MAX` entries are ignored like other unused settings;
+they cannot enable reply content. Any future preview feature needs a separate
+product decision and privacy review. Do not add AI summarization or source reads.
 
 ## 7. Privacy and security rules
 
@@ -249,10 +246,10 @@ Use high-entropy random topic names.
 
 ### 7.2 Notification payload
 
-Do not publish by default:
+Never publish conversation content:
 
-- complete user prompts;
-- complete assistant responses;
+- user prompts or excerpts;
+- assistant replies or excerpts;
 - source files;
 - code diffs;
 - API keys;
@@ -279,7 +276,6 @@ CODEX_NOTIFY_PROVIDER=ntfy
 NTFY_SERVER=https://ntfy.sh
 NTFY_TOPIC=<high-entropy-topic>
 CODEX_NOTIFY_DEVICE=<optional-friendly-device-name>
-CODEX_NOTIFY_SUMMARY_MAX=300
 CODEX_NOTIFY_TIMEOUT=5
 CODEX_NOTIFY_PROJECT_ROOTS=[]
 ```
@@ -333,7 +329,7 @@ Core code owns:
 - Codex payload parsing;
 - event filtering;
 - project/device derivation;
-- summary normalization;
+- metadata label normalization;
 - privacy rules;
 - provider selection.
 
@@ -457,12 +453,13 @@ At minimum test:
 6. device-name fallback;
 7. project-name extraction for Windows-style path;
 8. project-name extraction for POSIX-style path;
-9. Unicode summary;
-10. summary whitespace normalization;
-11. summary truncation;
+9. Unicode metadata;
+10. metadata whitespace normalization;
+11. metadata truncation;
 12. ntfy request formation;
 13. network timeout/provider error;
-14. no prompt/full input content leaks into default notification.
+14. no user input or assistant reply enters the outgoing request, including with
+    obsolete preview settings, JSON credentials, business prose and missing metadata.
 
 Prefer `unittest` and `unittest.mock` so tests can run without third-party dependencies.
 
@@ -480,8 +477,8 @@ V1 is complete when all of the following are true:
 - Two computers owned by the same person can share one personal topic and are distinguishable by device name.
 - Different users can use different topics without code changes.
 - No real topic or token is present in the Git repository.
-- The message contains project, status, device, and a short summary.
-- The message does not include full prompts/responses by default.
+- The message contains project, status, device, and an optional enabled task name.
+- The message never includes prompt or reply text; no preview feature remains.
 - Network/provider failure does not produce an uncontrolled traceback or indefinite block.
 - Automated tests pass without internet access.
 - README setup instructions match the implementation.

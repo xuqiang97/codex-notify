@@ -13,8 +13,14 @@ for the final configuration and commands.
 Follow-up: project-first notification titles and optional task-name metadata are
 implemented per Decision 014. Task-title lookup is a bounded read of an existing
 local index, disabled by default. Validate exact-thread matching, safe fallback,
-privacy filtering and summary-independent operation; no transcript access or
+privacy filtering and metadata-only operation; no transcript access or
 additional service is introduced. Current content examples are in README.
+
+Presentation follow-up (Decisions 016/017): use neutral turn-ended wording and
+Chinese metadata labels; keep only the computer tag. Reply previews and their
+configuration have been removed. Verify that all reply/input content is ignored,
+even with legacy preview settings, and missing task metadata never prevents a
+notification. Task names remain opt-in; enable them only with user consent.
 
 Windows follow-up (2026-09-23): add the optional project scope in Decision 015
 and check project-label privacy before truncation. Verify allowed/outside/missing
@@ -93,7 +99,6 @@ Optional configuration:
 
 ```text
 CODEX_NOTIFY_DEVICE=<friendly-device-name>
-CODEX_NOTIFY_SUMMARY_MAX=300
 CODEX_NOTIFY_TIMEOUT=5
 ```
 
@@ -102,7 +107,6 @@ Recommended defaults:
 - provider: `ntfy`;
 - server: `https://ntfy.sh`;
 - device: hostname;
-- summary max: `300`;
 - timeout: `5` seconds.
 
 `NTFY_TOPIC` has no default.
@@ -152,31 +156,13 @@ Important:
 
 Implementation may use `PureWindowsPath` / `PurePosixPath` or another well-tested strategy.
 
-## 6. Step 4 — Build the completion summary
+## 6. Step 4 — Exclude conversation content
 
-Source:
-
-- primarily `last-assistant-message`.
-
-Fallback:
-
-```text
-Codex finished the task.
-```
-
-Normalization:
-
-- convert to text safely;
-- collapse repeated whitespace/newlines for a phone-friendly preview;
-- preserve Unicode;
-- truncate to configured length;
-- make truncation visually clear, e.g. ellipsis.
-
-Do not:
-
-- send `input-messages` by default;
-- call an LLM to summarize;
-- include full response text.
+Only select event metadata needed for completion status, project and optional
+task-name lookup. Do not use `last-assistant-message` or `input-messages` in any
+outgoing text. Reply previews, summary limits and generic reply fallbacks were
+removed in Decision 017; obsolete settings cannot restore them. No AI call,
+conversation export, transcript scan or reply-content classifier is needed.
 
 ## 7. Step 5 — Build the notification model
 
@@ -192,12 +178,12 @@ Suggested user-facing content:
 
 ```text
 Title:
-Codex complete · Johnny-ThinkBook-A
+my-app · 本轮已结束
 
 Message:
-Project: amazon-asin-image-hub
-Status: completed
-Summary: Finished implementation and tests...
+设备：Laptop-A
+项目：my-app
+状态：本轮已结束
 ```
 
 The exact text may be polished, but the required information is:
@@ -205,7 +191,7 @@ The exact text may be polished, but the required information is:
 - device;
 - project;
 - completed status;
-- short summary.
+- optional task name.
 
 Avoid adding timestamps unless they provide clear value; the phone notification already has delivery time.
 
@@ -303,10 +289,11 @@ Minimum test matrix:
 | Config | hostname fallback |
 | Project | Windows-style path |
 | Project | POSIX-style path |
-| Summary | Unicode |
-| Summary | whitespace normalization |
-| Summary | truncation |
-| Privacy | input-messages not pushed |
+| Metadata | Unicode |
+| Metadata | whitespace normalization |
+| Metadata | truncation |
+| Privacy | input-messages and last-assistant-message never pushed |
+| Privacy | obsolete preview configuration cannot restore content |
 | Provider | expected ntfy URL/body/headers |
 | Provider | timeout |
 | Provider | HTTP/network failure |
@@ -339,7 +326,7 @@ Verify:
 - title is readable;
 - device is identifiable;
 - project is identifiable;
-- summary is not too long;
+- no reply/input excerpt is present;
 - Unicode is rendered correctly.
 
 Do not commit the test topic afterward.
@@ -381,13 +368,13 @@ Developer A should test both Windows machines using the same personal topic but 
 Expected phone notifications should make the source obvious, e.g.:
 
 ```text
-Codex complete · ThinkBook-A
+设备：ThinkBook-A
 ```
 
 and
 
 ```text
-Codex complete · ThinkBook-B
+设备：ThinkBook-B
 ```
 
 Developer B should use a different topic on macOS.

@@ -18,7 +18,6 @@ from providers import ntfy
 from task_metadata import lookup_task_title
 
 
-DEFAULT_SUMMARY = "Codex finished the task."
 ENV_PATH = Path(__file__).resolve().with_name(".env")
 
 
@@ -26,7 +25,6 @@ ENV_PATH = Path(__file__).resolve().with_name(".env")
 class Config:
     provider: str
     device: str = field(repr=False)
-    summary_max: int
     ntfy: ntfy.NtfyConfig = field(repr=False)
     task_title: bool = False
     project_roots: tuple[PurePosixPath | PureWindowsPath, ...] = field(default=(), repr=False)
@@ -115,12 +113,6 @@ def load_config(
     provider = values.get("CODEX_NOTIFY_PROVIDER", "ntfy").strip().lower()
     if provider != "ntfy":
         raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
-    try:
-        summary_max = int(values.get("CODEX_NOTIFY_SUMMARY_MAX", "300"))
-    except ValueError:
-        summary_max = -1
-    if not 0 <= summary_max <= 500:
-        raise ConfigurationError("CODEX_NOTIFY_SUMMARY_MAX must be an integer from 0 to 500")
     task_title = values.get("CODEX_NOTIFY_TASK_TITLE", "0").strip()
     if task_title not in ("0", "1"):
         raise ConfigurationError("CODEX_NOTIFY_TASK_TITLE must be 0 or 1")
@@ -131,7 +123,7 @@ def load_config(
         except OSError:
             device = "unknown-device"
     roots = load_project_roots(values.get("CODEX_NOTIFY_PROJECT_ROOTS", "[]"))
-    return Config(provider, device, summary_max, ntfy.load_config(values), task_title == "1", roots)
+    return Config(provider, device, ntfy.load_config(values), task_title == "1", roots)
 
 
 def normalize(text: str) -> str:
@@ -166,7 +158,7 @@ def project_name(event: dict, secrets: tuple[str, ...] = ()) -> str:
 
 
 # Conservative heuristics, NOT a general secret/business-data classifier.
-# Reject the whole excerpt on recognizable code, credentials, URLs or full paths.
+# Reject metadata labels containing recognizable code, credentials, URLs or paths.
 _SENSITIVE = re.compile(
     r"```|~~~|`|https?://|[A-Za-z]:[\\/]|\\\\|(?:^|[\s(\[\"'])/(?:\S+)"
     r"|(?:^|\n)(?:diff --git |@@ |[+-]{3} |\s*(?:def |class |import |from \S+ import |function |const |let |SELECT |INSERT ))"
@@ -184,14 +176,6 @@ def private_text(text: str, secrets: tuple[str, ...]) -> bool:
     )
 
 
-def build_summary(value: object, limit: int, secrets: tuple[str, ...] = ()) -> str:
-    if limit == 0:
-        return DEFAULT_SUMMARY
-    if not isinstance(value, str) or private_text(value, secrets):
-        value = DEFAULT_SUMMARY
-    return truncate(normalize(value) or DEFAULT_SUMMARY, limit)
-
-
 def build_notification(event: dict, config: Config) -> Notification:
     secrets = (config.ntfy.topic, config.ntfy.token)
     device = normalize(config.device)
@@ -201,21 +185,18 @@ def build_notification(event: dict, config: Config) -> Notification:
     task = lookup_task_title(event) if config.task_title else None
     if task is not None:
         task = None if private_text(task, secrets) else truncate(normalize(task), 80) or None
-    summary = build_summary(event.get("last-assistant-message"), config.summary_max, secrets)
     title_parts = []
     if project != "unknown-project":
         title_parts.append(project)
     if task:
         title_parts.append(task)
-    title_parts.append("本轮已完成")
+    title_parts.append("本轮已结束")
     if len(title_parts) == 1:
         title_parts.insert(0, "Codex")
-    lines = [f"Device: {truncate(device, 64) or 'unknown-device'}", f"Project: {project}"]
+    lines = [f"设备：{truncate(device, 64) or 'unknown-device'}", f"项目：{project}"]
     if task:
-        lines.append(f"Task: {task}")
-    lines.append("Status: turn completed")
-    if config.summary_max:
-        lines.append(f"Summary: {summary}")
+        lines.append(f"任务：{task}")
+    lines.append("状态：本轮已结束")
     return Notification(
         title=" · ".join(title_parts),
         message="\n".join(lines),

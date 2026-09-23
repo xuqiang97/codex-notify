@@ -1,3 +1,4 @@
+import contextlib
 import http.client
 import io
 import json
@@ -58,7 +59,7 @@ class HttpTests(OfflineTest):
     def setUp(self):
         super().setUp()
         self.config = ntfy.load_config(VALUES)
-        self.notification = Notification("Codex complete · 电脑", "Project: 项目\nStatus: completed\nSummary: 测试完成 ✅")
+        self.notification = Notification("项目 · 本轮已结束", "设备：测试电脑\n项目：项目\n状态：本轮已结束")
 
     def response(self, status=200):
         response = MagicMock()
@@ -80,9 +81,9 @@ class HttpTests(OfflineTest):
         self.assertEqual(json.loads(request.data), {
             "topic": VALUES["NTFY_TOPIC"], "title": self.notification.title,
             "message": self.notification.message, "priority": 3,
-            "tags": ["computer", "white_check_mark"],
+            "tags": ["computer"],
         })
-        self.assertIn("测试完成".encode("utf-8"), request.data)
+        self.assertIn("测试电脑".encode("utf-8"), request.data)
         response.read.assert_not_called()
         response.__exit__.assert_called_once()
 
@@ -176,7 +177,7 @@ except ProviderError:
     def test_maximum_unicode_configuration_fits_envelope(self):
         with patch("notify.read_env", return_value={}):
             config = notify.load_config(dict(VALUES, CODEX_NOTIFY_DEVICE="😀" * 200,
-                                            CODEX_NOTIFY_SUMMARY_MAX="500", NTFY_TOPIC="x" * 64))
+                                            NTFY_TOPIC="x" * 64))
         notification = notify.build_notification({"cwd": "/work/" + "😀" * 200,
                                                  "last-assistant-message": "😀" * 1000}, config)
         request = ntfy.build_request(config.ntfy, notification)
@@ -194,9 +195,46 @@ except ProviderError:
             self.assertEqual(notify.main(), 0)
         build.return_value.open.assert_called_once()
         body = json.loads(build.return_value.open.call_args.args[0].data)
-        self.assertIn("完成 ✅", body["message"])
+        self.assertNotIn("完成 ✅", body["message"])
+        self.assertEqual(body["message"], "设备：测试电脑\n项目：demo\n状态：本轮已结束")
         self.assertNotIn("private prompt", body["message"])
         self.assertNotIn("C:/work", body["message"])
+
+    def test_legacy_preview_settings_never_export_conversation_content(self):
+        event = {
+            "type": "agent-turn-complete", "cwd": "/work/demo",
+            "thread-id": "00000000-0000-4000-8000-000000000001",
+            "input-messages": ["PRIVATE INPUT"],
+            "last-assistant-message": '{"password":"PRIVATE REPLY"}',
+            "unknown": "PRIVATE EXTRA",
+        }
+        for named in (False, True):
+            for failure in (False, True):
+                with self.subTest(named=named, failure=failure):
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    environment = dict(VALUES, CODEX_NOTIFY_TASK_TITLE=str(int(named)),
+                                       CODEX_NOTIFY_SUMMARY_MAX="invalid-old-value")
+                    with patch("notify.read_env", return_value={"CODEX_NOTIFY_SUMMARY_MAX": "500"}), \
+                            patch.dict("os.environ", environment, clear=True), \
+                            patch("notify.lookup_task_title", return_value="测试任务"), \
+                            patch.object(sys, "argv", ["notify.py", json.dumps(event)]), \
+                            patch("urllib.request.build_opener") as build, \
+                            contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                        if failure:
+                            build.return_value.open.side_effect = OSError("PRIVATE ERROR")
+                        else:
+                            build.return_value.open.return_value = self.response()
+                        self.assertEqual(notify.main(), 0)
+                    build.return_value.open.assert_called_once()
+                    request = build.return_value.open.call_args.args[0]
+                    body = json.loads(request.data)
+                    expected = "设备：测试电脑\n项目：demo\n"
+                    if named:
+                        expected += "任务：测试任务\n"
+                    self.assertEqual(body["message"], expected + "状态：本轮已结束")
+                    self.assertEqual(set(body), {"topic", "title", "message", "priority", "tags"})
+                    self.assertNotIn("PRIVATE", request.data.decode("utf-8") +
+                                     str(request.header_items()) + stdout.getvalue() + stderr.getvalue())
 
 
 if __name__ == "__main__":

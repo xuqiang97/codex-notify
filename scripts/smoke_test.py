@@ -11,7 +11,6 @@ def main() -> int:
     event = {
         "type": "agent-turn-complete",
         "cwd": str(script.parent),
-        "last-assistant-message": "Manual notification test completed. 测试完成 ✅",
     }
     print("Sending one test event using your local configuration. Check stderr and your phone.")
     return subprocess.run([sys.executable, str(script), json.dumps(event)], check=False).returncode

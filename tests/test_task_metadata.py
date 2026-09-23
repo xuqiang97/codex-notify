@@ -90,55 +90,54 @@ class NotificationTitleTests(OfflineTest):
     def setUp(self):
         super().setUp()
         with patch("notify.read_env", return_value={}):
-            self.config = notify.load_config(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="1",
-                                                  CODEX_NOTIFY_SUMMARY_MAX="0"))
+            self.config = notify.load_config(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="1"))
 
-    def test_named_task_and_project_with_summary_off(self):
+    def test_named_task_and_project_without_reply_content(self):
         with patch("notify.lookup_task_title", return_value="修复登录问题") as lookup:
             result = notify.build_notification(EVENT, self.config)
         lookup.assert_called_once_with(EVENT)
-        self.assertEqual(result.title, "demo · 修复登录问题 · 本轮已完成")
-        self.assertIn("Device: 测试电脑", result.message)
-        self.assertIn("Task: 修复登录问题", result.message)
-        self.assertIn("Status: turn completed", result.message)
-        self.assertNotIn("Summary:", result.message)
+        self.assertEqual(result.title, "demo · 修复登录问题 · 本轮已结束")
+        self.assertIn("设备：测试电脑", result.message)
+        self.assertIn("任务：修复登录问题", result.message)
+        self.assertIn("状态：本轮已结束", result.message)
+        self.assertNotIn("回复预览：", result.message)
         self.assertNotIn(THREAD, result.title + result.message)
 
     def test_disabled_title_never_reads_local_index(self):
         with patch("notify.lookup_task_title", side_effect=AssertionError("disabled")):
             result = notify.build_notification(EVENT, replace(self.config, task_title=False))
-        self.assertEqual(result.title, "demo · 本轮已完成")
+        self.assertEqual(result.title, "demo · 本轮已结束")
 
     def test_missing_task_never_falls_back_to_user_prompt(self):
         event = dict(EVENT, **{"input-messages": ["PRIVATE PROMPT"],
                               "last-assistant-message": "PRIVATE ANSWER"})
         with patch("notify.lookup_task_title", return_value=None):
             result = notify.build_notification(event, self.config)
-        self.assertEqual(result.title, "demo · 本轮已完成")
+        self.assertEqual(result.title, "demo · 本轮已结束")
         self.assertNotIn("PRIVATE", result.title + result.message)
-        self.assertNotIn("Task:", result.message)
+        self.assertNotIn("任务：", result.message)
 
     def test_projectless_task_and_fully_generic_fallback(self):
         with patch("notify.project_name", return_value="unknown-project"), \
                 patch("notify.lookup_task_title", return_value="整理通知设置"):
-            self.assertEqual(notify.build_notification(EVENT, self.config).title, "整理通知设置 · 本轮已完成")
+            self.assertEqual(notify.build_notification(EVENT, self.config).title, "整理通知设置 · 本轮已结束")
         with patch("notify.project_name", return_value="unknown-project"), \
                 patch("notify.lookup_task_title", return_value=None):
-            self.assertEqual(notify.build_notification(EVENT, self.config).title, "Codex · 本轮已完成")
+            self.assertEqual(notify.build_notification(EVENT, self.config).title, "Codex · 本轮已结束")
 
     def test_title_privacy_filter_runs_before_truncation(self):
         for title in ("token=fixture", "/Users/private/secret", "Code `secret()`", VALUES["NTFY_TOPIC"],
                       "x" * 100 + " password=private", "https://private.invalid", "\x00\u202e"):
             with patch("notify.lookup_task_title", return_value=title):
                 result = notify.build_notification(EVENT, self.config)
-            self.assertEqual(result.title, "demo · 本轮已完成")
-            self.assertNotIn("Task:", result.message)
+            self.assertEqual(result.title, "demo · 本轮已结束")
+            self.assertNotIn("任务：", result.message)
 
     def test_long_title_unicode_normalization_and_size(self):
-        config = replace(self.config, device="😀" * 200, summary_max=500)
+        config = replace(self.config, device="😀" * 200)
         event = dict(EVENT, cwd="/work/" + "😀" * 200,
                      **{"last-assistant-message": "😀" * 1000})
         with patch("notify.lookup_task_title", return_value=" \n " + "😀" * 200):
             result = notify.build_notification(event, config)
-        self.assertIn("Task: " + "😀" * 79 + "…", result.message)
+        self.assertIn("任务：" + "😀" * 79 + "…", result.message)
         self.assertLessEqual(len(ntfy.build_request(config.ntfy, result).data), 4096)

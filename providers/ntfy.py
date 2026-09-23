@@ -73,7 +73,7 @@ def build_request(config: NtfyConfig, notification: Notification) -> urllib.requ
         "title": notification.title,
         "message": notification.message,
         "priority": 3,
-        "tags": ["computer", "white_check_mark"],
+        "tags": ["computer"],
     }, ensure_ascii=False).encode("utf-8")
     # Conservatively bound the entire JSON envelope, not just the message.
     if len(body) > 4096:

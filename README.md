@@ -75,8 +75,7 @@ different aliases. Different people should generate different topics.
 | `NTFY_TOPIC` | Required | 1–64 ASCII letters/digits/`_`/`-`; use the random generator |
 | `NTFY_TOKEN` | Empty | Optional bearer token for an authenticated server/account |
 | `CODEX_NOTIFY_DEVICE` | Hostname | Blank also uses the hostname; label capped at 64 characters |
-| `CODEX_NOTIFY_SUMMARY_MAX` | `300` | 0–500 characters, including ellipsis; `0` omits the summary |
-| `CODEX_NOTIFY_TASK_TITLE` | `0` | `1` opts into local task-title lookup; independent of the summary |
+| `CODEX_NOTIFY_TASK_TITLE` | `0` | `1` opts into local task-title lookup; may disclose sensitive title text |
 | `CODEX_NOTIFY_PROJECT_ROOTS` | `[]` | Optional JSON array of absolute folders; nonempty restricts notification to event cwd within those folders |
 | `CODEX_NOTIFY_TIMEOUT` | `5` | Total delivery wait and socket timeout in seconds; `0 < value <= 30` |
 
@@ -161,17 +160,16 @@ macOS:
 python3 scripts/smoke_test.py
 ```
 
-**This sends one real notification** using your local topic, with a harmless
-synthetic event and Unicode text. It does not invoke Codex or an AI API. Expected
-display:
+**This sends one real notification** using your local topic and a harmless
+synthetic event. The notification body uses Chinese labels; no Codex task or AI
+API is invoked. Expected display:
 
 ```text
-codex-notify · 本轮已完成
+codex-notify · 本轮已结束
 
-Device: Laptop-A
-Project: codex-notify
-Status: turn completed
-Summary: Manual notification test completed. 测试完成 ✅
+设备：Laptop-A
+项目：codex-notify
+状态：本轮已结束
 ```
 
 The sender is silent on success. Check both stderr and your phone: exit code zero
@@ -246,7 +244,11 @@ changing the hook. The CLI on PATH can differ from the desktop's bundled runtime
 
 ## Project and task names in notifications
 
-The title now shows the project basename and **本轮已完成** (this turn completed).
+The title shows the project basename and **本轮已结束** (this turn ended).
+The body uses Chinese labels: 设备 (device), 项目 (project), optional 任务 (task),
+状态 (status). There is no reply preview. Status always means the turn
+ended; it does not infer success, failure, or a request for approval. Only the
+computer tag is sent, without a success checkmark.
 To also show the Codex task name, add this opt-in setting to the sender's `.env`:
 
 ```dotenv
@@ -256,16 +258,16 @@ CODEX_NOTIFY_TASK_TITLE=1
 For example, a task named “修复登录问题” in project `my-app` appears as:
 
 ```text
-my-app · 修复登录问题 · 本轮已完成
+my-app · 修复登录问题 · 本轮已结束
 
-Device: Laptop-A
-Project: my-app
-Task: 修复登录问题
-Status: turn completed
+设备：Laptop-A
+项目：my-app
+任务：修复登录问题
+状态：本轮已结束
 ```
 
-The example uses `CODEX_NOTIFY_SUMMARY_MAX=0`: task names still work while no
-assistant response is sent. The two privacy settings are independent.
+Notifications never include assistant replies or user-input excerpts. Task names
+are separate local metadata and remain an explicit opt-in.
 
 The official completion event is not assumed to contain a task title. When
 explicitly enabled, the sender matches its `thread-id` to the existing local
@@ -288,27 +290,31 @@ apply; they cannot detect arbitrary confidential prose.
 
 ## Privacy and security boundaries
 
+- Reply previews have been removed. `last-assistant-message` and `input-messages`
+  are never used to construct notification content. Remove obsolete
+  `CODEX_NOTIFY_SUMMARY_MAX` entries from your `.env` or environment; if left in
+  place, they are ignored and cannot re-enable previews. No fallback preview text
+  is sent. A future preview feature requires a separate design and privacy review.
 - Anonymous topics are shared secrets, not authenticated private channels.
   Anyone who knows a topic may be able to read/publish to it. Generate random
   topics, rotate one if exposed, and use server-supported authentication/ACLs when
   needed. A token does not by itself make an otherwise public topic private.
 - `.env` and `.env.*` are Git-ignored, except the safe `.env.example`. Never use
   `git add -f` for private config. The template topic is rejected by the sender.
-- Only device alias, project **basename**, completion status, a bounded
-  assistant excerpt and (when opted in) a bounded task title are sent. `input-messages`, thread/turn IDs, unknown fields
-  and the raw event are not forwarded. Project uses an absolute event `cwd` if
-  usable, otherwise process cwd, then `unknown-project`. Both Windows and POSIX
-  paths work. Project and device labels are limited to 64 characters.
-- Whitespace is normalized; Unicode is preserved. A long response is truncated
-  with `…`. Recognizable absolute paths, URLs, code blocks/inline code, diff/code
-  markers, credential patterns or the configured topic/token in the response
-  cause a generic summary instead. This is conservative pattern matching, **not
-  a guarantee against arbitrary secrets, unfenced code, or customer/business
-  data**. A short ordinary response may fit entirely in the excerpt.
-- For sensitive work set `CODEX_NOTIFY_SUMMARY_MAX=0` to send no assistant text.
-  Device/project names and any enabled task title still travel to the provider; keep them non-sensitive
-  or do not enable the hook for confidential projects. No source files, diffs or
-  conversations are read from disk. No content is written to application logs.
+- Only device alias, project **basename**, fixed turn-ended status and (when opted
+  in) a bounded task title are sent. User inputs, assistant replies, thread/turn
+  IDs, unknown fields and the raw event are not forwarded. Project uses an
+  absolute event `cwd` if usable, otherwise process cwd, then `unknown-project`.
+  Both Windows and POSIX paths work. Project/device labels are capped at 64
+  characters; task names at 80. Whitespace is normalized and Unicode preserved.
+- Metadata labels retain conservative pattern checks for recognizable paths,
+  URLs, code/credential markers and the configured topic/token. These checks are
+  **not a guarantee against arbitrary confidential prose or unknown credentials**.
+  Keep device/project labels non-sensitive and leave task names disabled when
+  their disclosure is inappropriate. Removing reply previews does not anonymize
+  metadata. No source files, diffs or conversations are read from disk; the
+  optional task-name lookup only reads the bounded local index described above.
+  No content is written to application logs.
 - HTTPS certificate verification stays enabled. HTTP, URL credentials, query
   strings and redirects are rejected. Topics go in the JSON body, tokens only in
   the Authorization header. Errors never echo the payload, config values, URL,
@@ -335,9 +341,9 @@ apply; they cannot detect arbitrary confidential prose.
 | Connection error/timeout | DNS, firewall/proxy, TLS trust, HTTPS reachability; do not disable TLS verification |
 | Manual test works, Codex does not | User-level top-level `notify`, absolute paths, correct interpreter, restart Codex, supported event/version |
 | Notification goes to wrong phone | Environment overrides, server/topic subscription; different users need separate topics |
-| Only generic summary | No assistant text, summary disabled, or conservative privacy filter matched |
+| No reply preview, even with the old preview setting | Expected: reply previews were removed; only completion metadata is sent |
 | Wrong project label | Missing/invalid event cwd; unrestricted mode falls back to the hook process directory |
-| Runtime-folder notification with a suggestions JSON reply | Enable project scope; background internal tasks outside those directories will skip |
+| Notifications labeled with runtime folders | Optional project scope can exclude those directories, but also excludes unlisted projects/worktrees; it does not identify every background task |
 | No notification after enabling project scope | Check event cwd, JSON path syntax, and whether the project/worktree/smoke-test directory is included |
 | Phone delivery delayed | App permissions, mute/Focus, battery/background restrictions and network; compare foreground vs locked |
 

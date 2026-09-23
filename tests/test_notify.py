@@ -45,8 +45,8 @@ class EventTests(OfflineTest):
         self.assertEqual((result, error), (0, ""))
         send.assert_called_once()
         notification = send.call_args.args[1]
-        self.assertEqual(notification.title, "demo · 本轮已完成")
-        self.assertEqual(notification.message, "Device: 测试电脑\nProject: demo\nStatus: turn completed\nSummary: Finished tests.")
+        self.assertEqual(notification.title, "demo · 本轮已结束")
+        self.assertEqual(notification.message, "设备：测试电脑\n项目：demo\n状态：本轮已结束")
 
     def test_unsupported_events_do_not_load_config_or_publish(self):
         for kind in ("approval-requested", "other", None, [], {}):
@@ -55,6 +55,26 @@ class EventTests(OfflineTest):
                     result, error, send = self.invoke([json.dumps({"type": kind})], {})
                 self.assertEqual((result, error), (0, ""))
                 send.assert_not_called()
+
+    def test_reply_content_never_changes_notification_or_delivery(self):
+        replies = [
+            "检查失败，需要补充配置。", "检查通过。", '{"suggestions":[]}',
+            '{"password":"private-fixture"}', '{"api_key":"private-fixture"}',
+            "密码：private-fixture", "演示客户甲的内部报价为 12345 元。",
+            "return customer.private_field;", "普通短回复", "x" * 50000,
+            None, "", " \n ", {}, [], 42, "\ud800\u202e",
+        ]
+        for reply in replies:
+            with self.subTest(reply_type=type(reply).__name__):
+                event = {"type": "agent-turn-complete", "cwd": "/work/demo",
+                         "last-assistant-message": reply,
+                         "input-messages": ["PRIVATE INPUT"]}
+                result, error, send = self.invoke([json.dumps(event)])
+                self.assertEqual((result, error), (0, ""))
+                send.assert_called_once()
+                notification = send.call_args.args[1]
+                self.assertEqual(notification.title, "demo · 本轮已结束")
+                self.assertEqual(notification.message, "设备：测试电脑\n项目：demo\n状态：本轮已结束")
 
     def test_missing_and_extra_arguments(self):
         for args in ([], ["{}", "{}"]):
@@ -75,7 +95,8 @@ class EventTests(OfflineTest):
     def test_missing_optional_fields(self):
         result, error, send = self.invoke(['{"type":"agent-turn-complete"}'])
         self.assertEqual((result, error), (0, ""))
-        self.assertIn(notify.DEFAULT_SUMMARY, send.call_args.args[1].message)
+        self.assertTrue(send.call_args.args[1].message.endswith("状态：本轮已结束"))
+        self.assertEqual(len(send.call_args.args[1].message.splitlines()), 3)
 
     def test_missing_topic_is_a_local_error(self):
         result, error, send = self.invoke(['{"type":"agent-turn-complete"}'], {})
@@ -112,7 +133,6 @@ class ConfigTests(OfflineTest):
         with patch("notify.socket.gethostname", return_value="host-A"):
             config = self.load({"NTFY_TOPIC": VALUES["NTFY_TOPIC"]})
         self.assertEqual(config.device, "host-A")
-        self.assertEqual(config.summary_max, 300)
         self.assertEqual(config.provider, "ntfy")
         self.assertEqual(config.ntfy.server, "https://ntfy.sh")
         self.assertEqual(config.ntfy.timeout, 5)
@@ -130,12 +150,12 @@ class ConfigTests(OfflineTest):
             self.assertEqual(self.load(dict(VALUES, CODEX_NOTIFY_DEVICE=" ")).device, "unknown-device")
 
     def test_override_precedence_and_no_environment_mutation(self):
-        self.path.write_text("NTFY_TOPIC=file-fixture\nCODEX_NOTIFY_DEVICE=file-host\nCODEX_NOTIFY_SUMMARY_MAX=123\n", encoding="utf-8")
+        self.path.write_text("NTFY_TOPIC=file-fixture\nCODEX_NOTIFY_DEVICE=file-host\nCODEX_NOTIFY_TIMEOUT=3\n", encoding="utf-8")
         values = dict(VALUES)
         config = self.load(values)
         self.assertEqual(config.ntfy.topic, VALUES["NTFY_TOPIC"])
         self.assertEqual(config.device, "测试电脑")
-        self.assertEqual(config.summary_max, 123)
+        self.assertEqual(config.ntfy.timeout, 3)
         self.assertEqual(values, VALUES)
         with self.assertRaisesRegex(ConfigurationError, "required"):
             self.load({"NTFY_TOPIC": ""})
@@ -167,11 +187,14 @@ class ConfigTests(OfflineTest):
             with self.assertRaisesRegex(ConfigurationError, "UTF-8"):
                 self.load()
 
-    def test_summary_limit_validation(self):
-        for value in ("-1", "501", "3.5", "nan", "", "9" * 5000):
-            with self.subTest(value=value[:20]), self.assertRaises(ConfigurationError):
-                self.load(dict(VALUES, CODEX_NOTIFY_SUMMARY_MAX=value))
-        self.assertEqual(self.load(dict(VALUES, CODEX_NOTIFY_SUMMARY_MAX="0")).summary_max, 0)
+    def test_obsolete_preview_setting_cannot_restore_content(self):
+        event = {"cwd": "/work/demo", "last-assistant-message": "PRIVATE REPLY"}
+        for value in ("300", "500", "0", "", "invalid", "9" * 5000):
+            with self.subTest(value=value[:20]):
+                self.path.write_text("CODEX_NOTIFY_SUMMARY_MAX=" + value + "\n", encoding="utf-8")
+                for config in (self.load(), self.load(dict(VALUES, CODEX_NOTIFY_SUMMARY_MAX=value))):
+                    notification = notify.build_notification(event, config)
+                    self.assertEqual(notification.message, "设备：测试电脑\n项目：demo\n状态：本轮已结束")
 
     def test_example_is_not_a_working_topic(self):
         with self.assertRaisesRegex(ConfigurationError, "template"):
@@ -268,7 +291,7 @@ class ProjectScopeTests(OfflineTest):
                                                 "last-assistant-message": message})
             self.assertEqual((result, error), (0, ""))
             send.assert_called_once()
-            self.assertIn(message, send.call_args.args[1].message)
+            self.assertNotIn(message, send.call_args.args[1].message)
 
     def test_main_skips_missing_cwd_in_scoped_mode(self):
         result, error, send = self.invoke({"type": "agent-turn-complete"})
@@ -299,26 +322,21 @@ class ContentTests(OfflineTest):
             self.assertEqual(notify.project_name({}), "unknown-project")
 
     def test_unicode_and_whitespace(self):
-        self.assertEqual(notify.build_summary("  已完成\n\t测试　✅  👩‍💻 ", 300), "已完成 测试 ✅ 👩‍💻")
+        self.assertEqual(notify.normalize("  已完成\n\t测试　✅  👩‍💻 "), "已完成 测试 ✅ 👩‍💻")
 
     def test_controls_surrogates_and_bidi_are_removed(self):
-        self.assertEqual(notify.build_summary("done\x00\ud800\u202eevil", 300), "doneevil")
+        self.assertEqual(notify.normalize("done\x00\ud800\u202eevil"), "doneevil")
 
     def test_normalization_cannot_reintroduce_sensitive_content(self):
         for text in ("pass\x00word=fixture", "https:\u202e//private.invalid/", "secret-fi\x00xture"):
-            self.assertEqual(notify.build_summary(text, 300, ("secret-fixture",)), notify.DEFAULT_SUMMARY)
+            self.assertTrue(notify.private_text(text, ("secret-fixture",)))
 
     def test_truncation_and_minimum_limit(self):
-        self.assertEqual(notify.build_summary("你好世界完成", 4), "你好世…")
-        self.assertEqual(notify.build_summary("abcd", 4), "abcd")
-        self.assertEqual(notify.build_summary("abcd", 1), "…")
+        self.assertEqual(notify.truncate("你好世界完成", 4), "你好世…")
+        self.assertEqual(notify.truncate("abcd", 4), "abcd")
+        self.assertEqual(notify.truncate("abcd", 1), "…")
 
-    def test_non_string_empty_and_disabled_summaries(self):
-        for value in (None, {}, [], 12, "", " \t\n "):
-            self.assertEqual(notify.build_summary(value, 300), notify.DEFAULT_SUMMARY)
-        self.assertEqual(notify.build_summary("private business prose", 0), notify.DEFAULT_SUMMARY)
-
-    def test_obvious_paths_code_and_credentials_use_generic_summary(self):
+    def test_obvious_paths_code_and_credentials_are_private_metadata(self):
         fixtures = (
             "Created /Users/person/private/file.txt", r"Created C:\Users\person\file",
             r"Saved \\server\share\file", "```python\nprint('secret')\n```",
@@ -329,9 +347,9 @@ class ContentTests(OfflineTest):
         )
         for value in fixtures:
             with self.subTest(value=value[:30]):
-                self.assertEqual(notify.build_summary(value, 300), notify.DEFAULT_SUMMARY)
+                self.assertTrue(notify.private_text(value, ()))
 
-    def test_prompts_thread_ids_unknown_fields_and_full_response_are_not_sent(self):
+    def test_prompts_thread_ids_unknown_fields_and_reply_are_not_sent(self):
         with patch("notify.read_env", return_value={}):
             config = notify.load_config(VALUES)
         event = {"cwd": "/private/home/demo", "input-messages": ["PRIVATE USER PROMPT"],
@@ -341,8 +359,8 @@ class ContentTests(OfflineTest):
         outgoing = notification.title + notification.message
         self.assertNotIn("PRIVATE", outgoing)
         self.assertNotIn("/private/home", outgoing)
-        self.assertIn("Project: demo", outgoing)
-        self.assertTrue(notification.message.endswith("…"))
+        self.assertIn("项目：demo", outgoing)
+        self.assertEqual(notification.message, "设备：测试电脑\n项目：demo\n状态：本轮已结束")
 
     def test_configured_secrets_never_appear_in_display_content(self):
         values = dict(VALUES, CODEX_NOTIFY_DEVICE=VALUES["NTFY_TOPIC"], NTFY_TOKEN="fake-bearer-fixture")
@@ -367,8 +385,8 @@ class ContentTests(OfflineTest):
             for cwd in ("C:/work/" + name, "/work/" + name):
                 with self.subTest(cwd=cwd):
                     result = notify.build_notification({"cwd": cwd}, config)
-                    self.assertEqual(result.title, "Codex · 本轮已完成")
-                    self.assertIn("Project: unknown-project", result.message)
+                    self.assertEqual(result.title, "Codex · 本轮已结束")
+                    self.assertIn("项目：unknown-project", result.message)
                     self.assertNotIn(secret[:8], result.message)
 
     def test_project_fallback_and_late_sensitive_markers_are_checked(self):

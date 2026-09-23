@@ -47,9 +47,10 @@ Windows runner result.
   No private `.env` file is tracked. Repeat this review before future publication.
 - HTTPS-only endpoints, TLS verification, disabled redirects, bounded requests,
   safe diagnostics and omission of raw events are covered in code/tests.
-- Excerpt filtering is heuristic. Unknown credentials or confidential prose are
-  not reliably identifiable. Set `CODEX_NOTIFY_SUMMARY_MAX=0` for sensitive work;
-  non-sensitive device/project labels are still required. See README boundaries.
+- The original excerpt filter was heuristic and could not reliably identify
+  unknown credentials or confidential prose. Decision 017 subsequently removed
+  reply previews altogether. Non-sensitive metadata labels are still required;
+  see the removal checks below and current README boundaries.
 
 ## Follow-up: named tasks and iPhone delivery (2026-09-20)
 
@@ -141,6 +142,63 @@ use rather than repeating the entire phone-client/lock-screen setup. Check the
 for the exact published revision's cross-platform CI result; the baseline CI link
 above is not evidence for the changed code.
 
+## Scope follow-up and presentation refinement (2026-09-23)
+
+A later user report identified a background suggestion notification from inside an
+allowed project. The earlier absence-of-noise observation was therefore limited:
+directory scope cannot distinguish background tasks within allowed roots. The user
+accepted these notifications. Separately, a normal project task ran in a managed
+Codex worktree outside the selected root and was skipped. Adding the worktree root
+restored delivery, confirmed by the user on Xiaomi. The user then chose `[]` locally
+to avoid further directory-based omissions; mocked checks covered ordinary projects,
+worktrees, another drive, extended Windows paths and missing cwd. The optional
+scope implementation remains available; these checks do not guarantee all delivery.
+
+The user approved Decision 016's presentation changes: Chinese labels, neutral
+turn-ended wording, reply preview, and removal of the success checkmark. At that
+stage local task names were enabled with user consent, preview limit 300 and unrestricted scope.
+Other users retain the opt-in default. No private configuration or actual task
+titles are recorded here. The synthetic smoke text is now neutral as well.
+
+Local validation: **77 offline tests passed** on Windows/Python 3.14.6, including
+ordinary/error-looking replies, JSON, missing/private previews, disabled previews,
+missing task names, Unicode HTTP encoding and computer-only tags. Python 3.10
+syntax compatibility and compile checks passed. These were local checks at that
+stage; subsequent metadata-only phone receipt is recorded below.
+
+## Reply-preview removal (2026-09-23)
+
+After finding task names sufficient, the user disabled reply previews locally
+and then explicitly requested complete removal from V1 (Decision 017). A prior
+read-only audit reproduced missed JSON credentials and business prose with fake
+fixtures while previews were enabled. This motivated removal, not a claim of
+complete redaction. The user reported task names useful; this is not a new
+measurement of phone latency or duplicate count.
+
+The summary builder, generic reply fallback, preview configuration and outgoing
+preview field are now absent. The local obsolete setting was removed with an
+external backup; task names remain enabled and directory scope unrestricted.
+Existing preview settings in other installations are ignored, including nonzero
+or invalid values, and cannot restore reply content. Dotenv syntax must still be
+valid. Metadata privacy checks remain; task/device/project names may be sensitive.
+
+Validation: **77 offline tests passed** on Windows/Python 3.14.6. Tests cover
+short/long replies, JSON credentials, Chinese business prose, source snippets,
+missing/non-string replies and old settings in both dotenv and environment.
+Mocked event-to-HTTP checks assert metadata-only payloads with task names on/off
+and with successful/failing transport; reply/input markers never enter request
+bodies, headers or diagnostics. Existing Unicode, cross-platform paths, bounded
+metadata, TLS, redirect, timeout and provider-failure checks continue to pass.
+Python 3.10 AST compatibility, compile checks and `git diff --check` passed.
+These tests publish nothing. Check the published revision's workflow result for
+cross-platform CI; historical CI results do not validate this change.
+
+The user subsequently confirmed that real notifications still arrived normally
+on Xiaomi after reply-preview removal. This validates live receipt for the final
+metadata-only format, with task names enabled locally. Exact latency and count
+were not newly measured, and lock-screen/network variations were not repeated.
+No original notification text, real task name, topic or token is recorded here.
+
 ## Real-environment acceptance checklist
 
 No personal topic or phone subscription was available to the initial implementation
@@ -152,7 +210,7 @@ to the evidence.
 
 | Environment | Required evidence | Status |
 | --- | --- | --- |
-| Windows machine A → ntfy → Xiaomi/Android | Manual smoke; real Codex completed turn; exactly one notification | Baseline passed by user report; post-change real project receipt also confirmed |
+| Windows machine A → ntfy → Xiaomi/Android | Manual smoke; real Codex completed turn; exactly one notification | Baseline passed; final metadata-only real receipt confirmed by user, without a new latency/count measurement |
 | Windows machine B → same personal topic | Distinct device alias; no source changes | Pending |
 | macOS → ntfy → iPhone | Manual smoke; real Codex completed turn; exactly one notification | Receipt reported on 2026-09-20; exact count/latency pending |
 | Two users with different topics | No cross-user receipt | Pending |

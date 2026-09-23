@@ -185,12 +185,12 @@ Send:
 - friendly device name;
 - project name;
 - completion status;
-- short assistant summary.
+- optional task name (Decision 014); no assistant or user-message excerpts (Decision 017).
 
-Do not send by default:
+Do not send:
 
-- full prompts;
-- full assistant responses;
+- user prompts or excerpts;
+- assistant replies or excerpts;
 - source code/diffs;
 - business/customer data;
 - credentials;
@@ -203,7 +203,7 @@ Why:
 - ntfy/FCM/APNS-style messages have practical size constraints;
 - reduces accidental leakage.
 
-The current target summary length is roughly 300 characters.
+The original roughly 300-character excerpt design was removed by Decision 017.
 
 ## Decision 009 — Prefer Python standard library
 
@@ -303,8 +303,8 @@ For Xiaomi/HyperOS in particular, background/battery behavior should be tested i
 notifications instead of the generic completion title.
 
 Put the project basename and, when available and enabled, the Codex task title in
-the mobile title. Keep the device in the body. Use “本轮已完成” / “turn completed”
-to avoid claiming the whole task succeeded merely because one turn ended.
+the mobile title. Keep the device in the body. Decision 016 refines the original
+“本轮已完成” wording to “本轮已结束” to avoid implying task success.
 
 Task names are disabled by default (`CODEX_NOTIFY_TASK_TITLE=0`). Opting in reads
 only the last 1 MiB of Codex's existing local `session_index.jsonl`, matches the
@@ -314,8 +314,8 @@ Do not create a database, scan transcripts or extract a title from user prompts.
 
 This extends Decision 008's minimal payload with an explicitly enabled title,
 filtered before truncation to 80 characters. Title text may itself be sensitive
-and must be described as a separate opt-in from assistant summaries. Disabling
-summaries omits that line without disabling the task name. Core Python, official
+and must be described as an explicit opt-in. Decision 017 removes reply previews
+entirely while retaining optional task names. Core Python, official
 notify, ntfy, standard-library and completion-only decisions remain unchanged.
 
 ## Decision 015 — Optional explicit project scope for desktop internal-task noise
@@ -339,6 +339,48 @@ Limits: this is directory scope, not general internal-task detection. Internal
 tasks inside an allowed project can still notify. Symlinks are not resolved;
 this is not a security sandbox. Worktrees and projects elsewhere need their own
 roots. No new service, history store, provider or runtime dependency is added.
+
+## Decision 016 — Recognizable tasks and neutral reply previews
+
+**Status:** Accepted on 2026-09-23 after the user approved notification presentation
+improvements and enabling task names on this Windows machine. **Preview portions
+are superseded by Decision 017 below; neutral wording and metadata labels remain.**
+
+Use “本轮已结束” in the title and status, Chinese body labels, and “回复预览” for
+the bounded assistant excerpt. Replace the generic task-finished fallback with
+“本轮已结束，请返回 Codex 查看结果。”. Keep only the computer tag; a turn ending is
+not evidence of success. Preserve default length 300, existing environment keys,
+privacy checks and task-title fallback. No AI summarization, reply classification,
+new language framework, retries or history storage is added.
+
+Task-title lookup remains opt-in and disabled by default for other users; the
+current user explicitly enabled it locally. Missing titles never suppress a push.
+The user also chose unrestricted local scope after directory filtering missed a
+normal task in a managed worktree. Decision 015's optional capability remains for
+users who deliberately want directory restrictions; internal-task noise is accepted
+on this machine. Real configuration and task names are not committed.
+
+## Decision 017 — Remove reply previews from V1
+
+**Status:** Accepted on 2026-09-23 after the user explicitly requested deletion
+rather than a disabled preview feature.
+
+Notifications contain only device, project, optional task name and a neutral
+turn-ended status. Remove the summary builder, generic reply fallback, length
+setting and outgoing preview line. `last-assistant-message` and `input-messages`
+are ignored for notification construction. Old `CODEX_NOTIFY_SUMMARY_MAX` entries
+are unused settings and cannot restore content or cause value-validation errors;
+the dotenv file must still have valid syntax.
+
+Why: short ordinary replies could be forwarded in full, and heuristic filtering
+missed JSON credential fields and arbitrary confidential prose. The user only
+needs task identification and completion signals. Removal eliminates this reply
+export path without trying to build a general-purpose redaction system.
+
+Keep conservative privacy checks for device/project/task labels, optional bounded
+task-title lookup, event filtering, provider behavior and per-machine directory
+scope. Metadata can itself be sensitive; this decision does not promise otherwise.
+Any phase-two reply-preview feature requires a new design and privacy review.
 
 ## Changing these decisions
 
