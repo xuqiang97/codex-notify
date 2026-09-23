@@ -16,6 +16,14 @@ local index, disabled by default. Validate exact-thread matching, safe fallback,
 privacy filtering and summary-independent operation; no transcript access or
 additional service is introduced. Current content examples are in README.
 
+Windows follow-up (2026-09-23): add the optional project scope in Decision 015
+and check project-label privacy before truncation. Verify allowed/outside/missing
+event cwd, path-component boundaries on Windows/POSIX/UNC, environment precedence,
+and preservation of normal JSON replies. Capture the 2026-09-22 Windows/Xiaomi
+receipt reports separately from post-change regression and broader pending device
+acceptance. Preserve an existing desktop Computer Use notify wrapper when setting
+up the user-level hook; see README for the version-specific chained form.
+
 ## 1. Goal
 
 Deliver the smallest reliable V1 that turns a real Codex `agent-turn-complete` event into a concise mobile notification through ntfy.

@@ -141,6 +141,21 @@ Examples:
 
 Do not couple V1 to undocumented payload fields.
 
+### 5.4 Optional project scope
+
+`CODEX_NOTIFY_PROJECT_ROOTS` is a JSON array of absolute directory paths; the
+default `[]` preserves notifications from any directory. When nonempty, only
+publish if the event's valid absolute `cwd` is equal to or beneath a configured
+root. Compare path components, not string prefixes, using Windows/POSIX path
+semantics. Missing/invalid/outside `cwd` is a silent successful skip; do not use
+process cwd to bypass this explicit scope. Reject relative roots and `..`.
+This is a lexical notification scope, not a filesystem security boundary.
+
+This opt-in handles observed desktop internal-task noise without guessing from
+assistant JSON, hexadecimal directory names, prompt text or undocumented source
+fields. Internal tasks running inside an allowed root are not distinguished.
+Do not inspect transcripts/databases or build a background classifier for this.
+
 ## 6. Notification content
 
 The default notification must be useful at a glance but conservative about data exposure.
@@ -195,6 +210,7 @@ Potential derivation order:
 3. a generic fallback such as `unknown-project`.
 
 Only expose the final basename in the outgoing mobile notification.
+Apply privacy checks to the complete basename before truncating its display label.
 
 Windows and POSIX paths must both be handled correctly.
 
@@ -265,6 +281,7 @@ NTFY_TOPIC=<high-entropy-topic>
 CODEX_NOTIFY_DEVICE=<optional-friendly-device-name>
 CODEX_NOTIFY_SUMMARY_MAX=300
 CODEX_NOTIFY_TIMEOUT=5
+CODEX_NOTIFY_PROJECT_ROOTS=[]
 ```
 
 Configuration precedence should be simple and documented.

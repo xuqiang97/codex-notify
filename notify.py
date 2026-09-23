@@ -29,6 +29,7 @@ class Config:
     summary_max: int
     ntfy: ntfy.NtfyConfig = field(repr=False)
     task_title: bool = False
+    project_roots: tuple[PurePosixPath | PureWindowsPath, ...] = field(default=(), repr=False)
 
 
 def parse_event(raw: str) -> dict:
@@ -43,6 +44,42 @@ def parse_event(raw: str) -> dict:
 
 def is_supported_event(event: dict) -> bool:
     return event.get("type") == "agent-turn-complete"
+
+
+def absolute_path(value: object) -> PurePosixPath | PureWindowsPath | None:
+    """Parse paths lexically on either OS, without filesystem access."""
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        return None
+    windows = PureWindowsPath(value)
+    path = windows if windows.drive or "\\" in value else PurePosixPath(value)
+    if not path.is_absolute() or ".." in path.parts:
+        return None
+    return path
+
+
+def load_project_roots(raw: str) -> tuple[PurePosixPath | PureWindowsPath, ...]:
+    diagnostic = "CODEX_NOTIFY_PROJECT_ROOTS must be a JSON array of absolute directory paths without '..'"
+    try:
+        values = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise ConfigurationError(diagnostic) from None
+    if not isinstance(values, list):
+        raise ConfigurationError(diagnostic)
+    roots = []
+    for value in values:
+        path = absolute_path(value)
+        if path is None:
+            raise ConfigurationError(diagnostic)
+        roots.append(path)
+    return tuple(roots)
+
+
+def is_in_project_scope(event: dict, config: Config) -> bool:
+    if not config.project_roots:
+        return True
+    # Never substitute the hook's cwd for a missing event cwd when scope is set.
+    path = absolute_path(event.get("cwd"))
+    return path is not None and any(path.is_relative_to(root) for root in config.project_roots)
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -93,7 +130,8 @@ def load_config(
             device = socket.gethostname()
         except OSError:
             device = "unknown-device"
-    return Config(provider, device, summary_max, ntfy.load_config(values), task_title == "1")
+    roots = load_project_roots(values.get("CODEX_NOTIFY_PROJECT_ROOTS", "[]"))
+    return Config(provider, device, summary_max, ntfy.load_config(values), task_title == "1", roots)
 
 
 def normalize(text: str) -> str:
@@ -110,16 +148,10 @@ def truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def project_name(event: dict) -> str:
+def project_name(event: dict, secrets: tuple[str, ...] = ()) -> str:
     def basename(value: object) -> str:
-        if not isinstance(value, str) or not value.strip() or "\x00" in value:
-            return ""
-        windows = PureWindowsPath(value)
-        path = windows if windows.drive or "\\" in value else PurePosixPath(value)
-        # A relative cwd is ambiguous; don't let arbitrary event text become metadata.
-        if not path.is_absolute() or ".." in path.parts:
-            return ""
-        return path.name
+        path = absolute_path(value)
+        return path.name if path is not None else ""
 
     name = basename(event.get("cwd"))
     if not name:
@@ -127,6 +159,9 @@ def project_name(event: dict) -> str:
             name = basename(os.getcwd())
         except OSError:
             pass
+    # Inspect the full label: truncation can otherwise conceal part of a secret.
+    if private_text(name, secrets):
+        return "unknown-project"
     return truncate(normalize(name), 64) or "unknown-project"
 
 
@@ -162,9 +197,7 @@ def build_notification(event: dict, config: Config) -> Notification:
     device = normalize(config.device)
     if private_text(device, secrets):
         device = "unknown-device"
-    project = project_name(event)
-    if private_text(project, secrets):
-        project = "unknown-project"
+    project = project_name(event, secrets)
     task = lookup_task_title(event) if config.task_title else None
     if task is not None:
         task = None if private_text(task, secrets) else truncate(normalize(task), 80) or None
@@ -208,6 +241,8 @@ def main() -> int:
         return 0
     try:
         config = load_config()
+        if not is_in_project_scope(event, config):
+            return 0
         send_notification(config, build_notification(event, config))
     except ConfigurationError as exc:
         print(f"codex-notify: {exc}", file=sys.stderr)

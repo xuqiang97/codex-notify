@@ -6,7 +6,8 @@ Send a concise Codex completion notification to Android or iPhone:
 Codex official notify -> notify.py -> HTTPS ntfy -> Android / iPhone
 ```
 
-**Implementation available; real-device acceptance is still pending.** The sender
+**Windows/Xiaomi delivery has been user-verified; full V1 device acceptance is
+still pending.** See [validation details](docs/VALIDATION.md) for scope and dates. The sender
 uses Python 3.10+ and the standard library only. It handles `agent-turn-complete`,
 with one publish attempt per invocation. There is no daemon, polling, AI summary
 API, remote approval, or remote control. “Completed” means the Codex turn ended;
@@ -76,6 +77,7 @@ different aliases. Different people should generate different topics.
 | `CODEX_NOTIFY_DEVICE` | Hostname | Blank also uses the hostname; label capped at 64 characters |
 | `CODEX_NOTIFY_SUMMARY_MAX` | `300` | 0–500 characters, including ellipsis; `0` omits the summary |
 | `CODEX_NOTIFY_TASK_TITLE` | `0` | `1` opts into local task-title lookup; independent of the summary |
+| `CODEX_NOTIFY_PROJECT_ROOTS` | `[]` | Optional JSON array of absolute folders; nonempty restricts notification to event cwd within those folders |
 | `CODEX_NOTIFY_TIMEOUT` | `5` | Total delivery wait and socket timeout in seconds; `0 < value <= 30` |
 
 Precedence: **process environment > script-local `.env` > non-secret defaults**.
@@ -90,6 +92,43 @@ Duplicate keys use the last value. Malformed lines fail locally without printing
 their contents. Environment-only configuration is also supported; ensure the
 Codex process actually inherits it and restart Codex after changing its environment.
 
+### Limit notifications to your projects
+
+Desktop background tasks can also produce completion events. In Windows testing,
+a background suggestion task produced a notification labeled with a Codex runtime
+folder and a JSON reply. To exclude directories outside your projects, set a
+scope in the sender's `.env` (use your actual parent folder or individual projects):
+
+Windows:
+
+```dotenv
+CODEX_NOTIFY_PROJECT_ROOTS=["D:/Projects"]
+```
+
+macOS, including multiple project locations:
+
+```dotenv
+CODEX_NOTIFY_PROJECT_ROOTS=["/Users/you/Projects","/Users/you/OtherProject"]
+```
+
+Forward slashes avoid JSON backslash escaping on Windows. Include external
+worktree locations explicitly if you want notifications from them. The root itself
+and its descendants match; `D:/Projects-old` does not match `D:/Projects`.
+Windows paths compare without case, POSIX paths with case, independent of the OS
+running the sender. This lexical check does not resolve filesystem symlinks.
+
+With a nonempty scope, missing, invalid, relative, parent-traversing or outside
+event `cwd` skips silently with exit code zero. Process cwd is not a fallback for
+scope checks. `[]` restores unrestricted behavior, including missing-cwd fallback
+for project naming. Empty/malformed setting values are configuration errors.
+No folder paths are added to outgoing notifications.
+
+This limits directories; it is not a universal internal-task detector. Internal
+tasks inside an allowed root may still notify. JSON answers from allowed projects
+remain eligible. The sender reads neither prompts nor logs/databases to classify
+tasks. Changes to the script-local `.env` take effect on the next invocation;
+environment overrides still take precedence.
+
 ## 3. Subscribe on the phone
 
 Install the official ntfy client using the links on
@@ -102,7 +141,9 @@ For Xiaomi/HyperOS, test foreground, background and locked-screen delivery. If
 background delivery fails, check notification permission, autostart/background
 activity and battery restrictions for ntfy; menu names vary by OS release.
 On iPhone, check notification/lock-screen permissions and Focus settings. Test on
-Wi-Fi and cellular. These are checks to perform, not a claim of tested delivery.
+Wi-Fi and cellular. The Windows/Xiaomi check used Google Play ntfy with Instant
+Delivery enabled; there is no requirement to switch to F-Droid. See the validation
+record for the conditions actually tested rather than assuming all combinations pass.
 
 ## 4. First manual test
 
@@ -136,6 +177,8 @@ Summary: Manual notification test completed. 测试完成 ✅
 The sender is silent on success. Check both stderr and your phone: exit code zero
 alone does not prove delivery. Provider errors also return zero to keep the Codex
 turn successful. Missing/bad local configuration or input returns `2`.
+If project scope is enabled, include this sender's repository location before
+running the smoke test, or its synthetic event is intentionally skipped.
 
 ## 5. Configure Codex's official hook
 
@@ -174,6 +217,32 @@ References: [official notify documentation](https://developers.openai.com/zh-Han
 and [configuration reference](https://developers.openai.com/docs/config-file/config-reference).
 The external hook and terminal `tui.notifications` are different features.
 V1 only handles `agent-turn-complete`; approval events are ignored.
+
+### Windows desktop: preserve an existing Computer Use hook
+
+The desktop versions inspected in September 2026 can manage a user-level hook
+whose first arguments are an installed `codex-computer-use.exe` and `turn-ended`.
+Preserve that handler rather than discarding it. Those versions support forwarding
+to a user command through `--previous-notify` and a **JSON-encoded command array**:
+
+```toml
+notify = [
+  'C:\path\to\installed\codex-computer-use.exe',
+  'turn-ended',
+  '--previous-notify',
+  '["C:\\path\\to\\python.exe", "D:\\Projects\\codex-notify\\notify.py"]'
+]
+```
+
+This template uses TOML literal strings; the last item is JSON, so its Windows
+backslashes are doubled. Keep the actual existing helper path and use your real
+Python/sender paths. Do not add an event argument or a second top-level `notify`.
+If a `--previous-notify` command already exists, inspect its purpose before
+replacing it. This chain is a desktop implementation detail, not an official
+cross-version API: after an app update check the resulting config and real delivery.
+Without this wrapper, use the ordinary Windows/macOS examples above. Back up the
+user config, preserve unrelated settings, and fully restart the desktop app after
+changing the hook. The CLI on PATH can differ from the desktop's bundled runtime.
 
 ## Project and task names in notifications
 
@@ -267,7 +336,9 @@ apply; they cannot detect arbitrary confidential prose.
 | Manual test works, Codex does not | User-level top-level `notify`, absolute paths, correct interpreter, restart Codex, supported event/version |
 | Notification goes to wrong phone | Environment overrides, server/topic subscription; different users need separate topics |
 | Only generic summary | No assistant text, summary disabled, or conservative privacy filter matched |
-| Wrong project label | Missing/invalid event cwd; fallback uses the hook process directory |
+| Wrong project label | Missing/invalid event cwd; unrestricted mode falls back to the hook process directory |
+| Runtime-folder notification with a suggestions JSON reply | Enable project scope; background internal tasks outside those directories will skip |
+| No notification after enabling project scope | Check event cwd, JSON path syntax, and whether the project/worktree/smoke-test directory is included |
 | Phone delivery delayed | App permissions, mute/Focus, battery/background restrictions and network; compare foreground vs locked |
 
 Proxy behavior follows Python urllib's platform/environment proxy configuration.

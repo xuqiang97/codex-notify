@@ -318,6 +318,28 @@ and must be described as a separate opt-in from assistant summaries. Disabling
 summaries omits that line without disabling the task name. Core Python, official
 notify, ntfy, standard-library and completion-only decisions remain unchanged.
 
+## Decision 015 — Optional explicit project scope for desktop internal-task noise
+
+**Status:** Accepted on 2026-09-23 after Windows validation exposed an unrelated
+desktop background suggestion notification and the user selected a project root.
+
+Support `CODEX_NOTIFY_PROJECT_ROOTS` as a JSON array of absolute local directories.
+An empty array (default) retains the prior behavior. With roots configured, only
+the event's absolute `cwd`, equal to or beneath a root, permits notification.
+Missing/invalid/outside cwd skips silently; it must not fall back to the hook's
+process directory for this decision. Use path components and platform path
+semantics; reject relative paths and parent traversal.
+
+Why: the observed internal task used a Codex runtime directory. Scope lets a user
+exclude such directories without suppressing legitimate JSON responses, matching
+a changing runtime hash, reading prompts or depending on undocumented event
+source fields. It also lets each computer choose its own project locations.
+
+Limits: this is directory scope, not general internal-task detection. Internal
+tasks inside an allowed project can still notify. Symlinks are not resolved;
+this is not a security sandbox. Worktrees and projects elsewhere need their own
+roots. No new service, history store, provider or runtime dependency is added.
+
 ## Changing these decisions
 
 A future contributor may propose a change, but should:

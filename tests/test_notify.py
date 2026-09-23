@@ -183,6 +183,99 @@ class ConfigTests(OfflineTest):
         read.assert_called_once_with(ROOT / ".env")
 
 
+class ProjectScopeTests(OfflineTest):
+    def config(self, roots):
+        with patch("notify.read_env", return_value={}):
+            return notify.load_config(dict(VALUES, CODEX_NOTIFY_PROJECT_ROOTS=json.dumps(roots)))
+
+    def test_default_scope_preserves_missing_cwd_fallback(self):
+        with patch("notify.read_env", return_value={}):
+            config = notify.load_config(VALUES)
+        self.assertEqual(config.project_roots, ())
+        self.assertTrue(notify.is_in_project_scope({}, config))
+
+    def test_windows_scope_matches_components_case_and_both_separators(self):
+        config = self.config(["D:/Projects/"])
+        for cwd in ("D:/Projects", "d:/projects/app", "D:\\Projects\\中文 项目\\src"):
+            with self.subTest(cwd=cwd):
+                self.assertTrue(notify.is_in_project_scope({"cwd": cwd}, config))
+        for cwd in ("D:/Projects-other/app", "E:/Projects/app", "D:/Projects/../private", "/Projects/app"):
+            with self.subTest(cwd=cwd):
+                self.assertFalse(notify.is_in_project_scope({"cwd": cwd}, config))
+
+    def test_posix_scope_is_case_sensitive_and_accepts_multiple_roots(self):
+        config = self.config(["/Users/test/Projects", "/work/other"])
+        for cwd in ("/Users/test/Projects/app", "/work/other", "/work/other/中文项目"):
+            self.assertTrue(notify.is_in_project_scope({"cwd": cwd}, config))
+        for cwd in ("/users/test/Projects/app", "/work/other-app", "/work/elsewhere"):
+            self.assertFalse(notify.is_in_project_scope({"cwd": cwd}, config))
+
+    def test_unc_scope_does_not_match_another_share(self):
+        config = self.config([r"\\server\share\Projects"])
+        self.assertTrue(notify.is_in_project_scope({"cwd": r"\\SERVER\share\Projects\app"}, config))
+        self.assertFalse(notify.is_in_project_scope({"cwd": r"\\server\share-other\Projects\app"}, config))
+
+    def test_missing_or_invalid_event_cwd_never_uses_process_cwd(self):
+        config = self.config(["D:/Projects"])
+        for cwd in (None, {}, [], 42, "", "relative", "D:Projects", "D:/Projects/../other", "D:/Projects/\x00bad"):
+            with self.subTest(cwd=cwd), patch("notify.os.getcwd", side_effect=AssertionError("no fallback")):
+                self.assertFalse(notify.is_in_project_scope({"cwd": cwd}, config))
+
+    def test_bad_scope_config_never_echoes_values(self):
+        invalid = ("", "private-value", "[" * 2000, "null", "{}", '"private-value"',
+                   '["relative-private-value"]', '[null]', '[42]', '[{}]',
+                   '["/private-value/../other"]', '["https://private-value.invalid"]')
+        for raw in invalid:
+            with self.subTest(raw=raw[:40]), patch("notify.read_env", return_value={}):
+                with self.assertRaises(ConfigurationError) as raised:
+                    notify.load_config(dict(VALUES, CODEX_NOTIFY_PROJECT_ROOTS=raw))
+                self.assertNotIn("private-value", str(raised.exception))
+
+    def test_environment_scope_overrides_file_and_can_disable_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text('CODEX_NOTIFY_PROJECT_ROOTS=["/work/file"]\n', encoding="utf-8")
+            config = notify.load_config(VALUES, path)
+            self.assertTrue(notify.is_in_project_scope({"cwd": "/work/file/project"}, config))
+            config = notify.load_config(dict(VALUES, CODEX_NOTIFY_PROJECT_ROOTS='["/work/env"]'), path)
+            self.assertFalse(notify.is_in_project_scope({"cwd": "/work/file/project"}, config))
+            self.assertTrue(notify.is_in_project_scope({"cwd": "/work/env/project"}, config))
+            config = notify.load_config(dict(VALUES, CODEX_NOTIFY_PROJECT_ROOTS="[]"), path)
+            self.assertTrue(notify.is_in_project_scope({}, config))
+            self.assertNotIn("/work/", repr(config))
+
+    def invoke(self, event):
+        with patch("notify.read_env", return_value={}), \
+                patch.dict(os.environ, dict(VALUES, CODEX_NOTIFY_PROJECT_ROOTS='["D:/Projects"]'), clear=True), \
+                patch.object(sys, "argv", ["notify.py", json.dumps(event)]), \
+                patch("notify.ntfy.send_notification") as send, \
+                patch("notify.lookup_task_title", side_effect=AssertionError("no index reads")), \
+                contextlib.redirect_stderr(io.StringIO()) as error:
+            result = notify.main()
+        return result, error.getvalue(), send
+
+    def test_runtime_suggestion_event_is_silently_skipped_before_building(self):
+        event = {"type": "agent-turn-complete", "cwd": "C:/Users/test/AppData/Local/OpenAI/Codex/bin/0123456789abcdef",
+                 "last-assistant-message": '{"suggestions":[]}'}
+        with patch("notify.build_notification", side_effect=AssertionError("must skip content")):
+            result, error, send = self.invoke(event)
+        self.assertEqual((result, error), (0, ""))
+        send.assert_not_called()
+
+    def test_valid_project_json_and_hash_names_are_not_filtered(self):
+        for message in ('{"suggestions":[]}', '{"ok":true}', "Work mode completed."):
+            result, error, send = self.invoke({"type": "agent-turn-complete", "cwd": "D:/Projects/0123456789abcdef",
+                                                "last-assistant-message": message})
+            self.assertEqual((result, error), (0, ""))
+            send.assert_called_once()
+            self.assertIn(message, send.call_args.args[1].message)
+
+    def test_main_skips_missing_cwd_in_scoped_mode(self):
+        result, error, send = self.invoke({"type": "agent-turn-complete"})
+        self.assertEqual((result, error), (0, ""))
+        send.assert_not_called()
+
+
 class ContentTests(OfflineTest):
     def test_project_paths_from_both_platforms(self):
         cases = {
@@ -263,6 +356,25 @@ class ContentTests(OfflineTest):
             self.assertNotIn(secret, notification.title + notification.message)
             self.assertNotIn(secret, repr(config))
             self.assertNotIn(secret, repr(config.ntfy))
+
+    def test_project_privacy_is_checked_before_truncation(self):
+        values = dict(VALUES, NTFY_TOKEN="fake-bearer-fixture")
+        with patch("notify.read_env", return_value={}):
+            config = notify.load_config(values)
+        for secret in (values["NTFY_TOPIC"], values["NTFY_TOKEN"]):
+            # The old 64-character cap exposed a prefix of this configured secret.
+            name = "p" * 55 + secret
+            for cwd in ("C:/work/" + name, "/work/" + name):
+                with self.subTest(cwd=cwd):
+                    result = notify.build_notification({"cwd": cwd}, config)
+                    self.assertEqual(result.title, "Codex · 本轮已完成")
+                    self.assertIn("Project: unknown-project", result.message)
+                    self.assertNotIn(secret[:8], result.message)
+
+    def test_project_fallback_and_late_sensitive_markers_are_checked(self):
+        for name in ("p" * 100 + " password=fixture", "p" * 55 + VALUES["NTFY_TOPIC"]):
+            with patch("notify.os.getcwd", return_value="/work/" + name):
+                self.assertEqual(notify.project_name({}, (VALUES["NTFY_TOPIC"],)), "unknown-project")
 
 
 class CliTests(OfflineTest):
