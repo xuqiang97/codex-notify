@@ -107,9 +107,15 @@ def read_env(path: Path) -> dict[str, str]:
 
 def load_config(
     environ: Mapping[str, str] | None = None, env_path: Path | None = None,
-) -> Config:
+) -> Config | None:
+    """Return None when explicitly disabled, before validating delivery settings."""
     values = read_env(ENV_PATH if env_path is None else env_path)
     values.update(os.environ if environ is None else environ)
+    enabled = values.get("CODEX_NOTIFY_ENABLED", "1").strip()
+    if enabled not in ("0", "1"):
+        raise ConfigurationError("CODEX_NOTIFY_ENABLED must be 0 or 1")
+    if enabled == "0":
+        return None
     provider = values.get("CODEX_NOTIFY_PROVIDER", "ntfy").strip().lower()
     if provider != "ntfy":
         raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
@@ -209,20 +215,19 @@ def send_notification(config: Config, notification: Notification) -> None:
     ntfy.send_notification(config.ntfy, notification)
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print("codex-notify: expected one event JSON argument", file=sys.stderr)
-        return 2
-    try:
-        event = parse_event(sys.argv[1])
-    except ValueError as exc:
-        print(f"codex-notify: {exc}", file=sys.stderr)
-        return 2
+def handle_event(event: dict, *, report_skips: bool = False) -> int:
+    """Shared delivery path for the hook and manual smoke test."""
     if not is_supported_event(event):
         return 0
     try:
         config = load_config()
+        if config is None:
+            if report_skips:
+                print("Notifications are disabled (CODEX_NOTIFY_ENABLED=0); nothing was sent.")
+            return 0
         if not is_in_project_scope(event, config):
+            if report_skips:
+                print("Test directory is outside the configured project scope; nothing was sent.")
             return 0
         send_notification(config, build_notification(event, config))
     except ConfigurationError as exc:
@@ -233,6 +238,18 @@ def main() -> int:
         # Best effort: a push outage must not look like a failed Codex turn.
         return 0
     return 0
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("codex-notify: expected one event JSON argument", file=sys.stderr)
+        return 2
+    try:
+        event = parse_event(sys.argv[1])
+    except ValueError as exc:
+        print(f"codex-notify: {exc}", file=sys.stderr)
+        return 2
+    return handle_event(event)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,25 @@ it does not assert that the task or its tests succeeded.
 
 ## 1. Prerequisites and clone
 
+For a new computer, follow this checklist in order. Each installation has its own
+private configuration; cloning does not transfer another computer's `.env` or hook.
+
+1. Install Git/Python, clone to a stable path, and confirm the actual interpreter below.
+2. Run `python -m unittest discover -v` (`python3` on macOS). This needs no real topic and sends nothing.
+3. Create the sender's `.env` only if absent. Choose an existing personal topic or generate a new one locally; set a distinct device alias.
+4. Keep project scope `[]`. Task names are off by default; explicitly opt in with `CODEX_NOTIFY_TASK_TITLE=1` if wanted.
+5. Subscribe on the phone if needed, then run the manual smoke test and confirm receipt.
+6. Inspect and back up the existing user-level Codex config, preserve any desktop wrapper, and use this computer's actual Python/sender paths.
+7. Restart Codex if needed and confirm a real completed turn reaches the phone. Offline tests and HTTP success alone are not device acceptance.
+
+For another computer owned by the same person, reusing the existing personal
+topic lets the existing phone subscription receive both computers' messages.
+Different device aliases identify the source. Transfer the topic privately; do
+not put it in a chat, issue or Git. Do not copy an old computer's entire Codex
+config: executable and desktop helper paths may differ. This sender only needs
+one configured installation per intended local Codex environment, not one clone
+inside every business project.
+
 - Python 3.10+ and Git on Windows or macOS.
 - A local Codex version supporting the official external `notify` hook.
 - HTTPS access to `https://ntfy.sh` from the computer and phone.
@@ -40,7 +59,9 @@ Python and paths and has not been validated here.
 
 ## 2. Configure a private topic locally
 
-Copy `.env.example` to **`.env` beside `notify.py`**:
+For first-time setup only, copy `.env.example` to **`.env` beside `notify.py`**.
+If `.env` already exists, edit it instead of copying over it. Generate a topic
+only if you are not reusing an existing personal one:
 
 Windows PowerShell:
 
@@ -71,6 +92,7 @@ different aliases. Different people should generate different topics.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `CODEX_NOTIFY_ENABLED` | `1` | Local master switch: `0` skips delivery; `1` enables it |
 | `CODEX_NOTIFY_PROVIDER` | `ntfy` | Only V1 provider |
 | `NTFY_SERVER` | `https://ntfy.sh` | HTTPS origin; optional port, no path/query/credentials |
 | `NTFY_TOPIC` | Required | 1–64 ASCII letters/digits/`_`/`-`; use the random generator |
@@ -81,8 +103,8 @@ different aliases. Different people should generate different topics.
 | `CODEX_NOTIFY_TIMEOUT` | `5` | Total delivery wait and socket timeout in seconds; `0 < value <= 30` |
 
 Precedence: **process environment > script-local `.env` > non-secret defaults**.
-An explicitly empty environment value overrides the file; an empty topic disables
-publishing with a configuration error. The working project's `.env` is never
+An explicitly empty environment value overrides the file; when enabled, an empty
+topic is a configuration error, not a pause switch. The working project's `.env` is never
 read. Each copy of the sender has its own `.env`.
 
 The small `.env` parser accepts literal `KEY=value`, blank lines, full-line `#`
@@ -91,6 +113,47 @@ processing, multiline values or inline comments. A `#` inside a value is literal
 Duplicate keys use the last value. Malformed lines fail locally without printing
 their contents. Environment-only configuration is also supported; ensure the
 Codex process actually inherits it and restart Codex after changing its environment.
+
+### Change everyday settings
+
+Edit the `.env` beside the sender referenced by your hook, not a business project's
+`.env`. On Windows, open it in Notepad; on macOS, use a plain-text editor. Keep real
+topics/tokens local and save as UTF-8. Avoid duplicate entries for the same key.
+
+| Change | Setting and next step |
+| --- | --- |
+| Topic | Add the new subscription on the phone, update `NTFY_TOPIC`, then run the manual test. Update other computers individually if they should use the new topic too; remove the old subscription after confirming migration. |
+| Device alias | Change `CODEX_NOTIFY_DEVICE`, e.g. `Windows-B`; the next notification uses it. Blank falls back to hostname. |
+| Task name display | Set `CODEX_NOTIFY_TASK_TITLE=1` to show eligible names, or `0` to omit them. This does not disable notifications. |
+
+Saved `.env` changes take effect on the next invocation without an app restart,
+unless inherited environment variables override them. If a change seems ignored,
+check the sender path and same-named environment overrides first. Changing the
+Codex process's inherited environment requires restarting that process.
+
+### Pause and resume notifications
+
+Set the master switch in the sender's `.env`:
+
+```dotenv
+CODEX_NOTIFY_ENABLED=0
+```
+
+Use `1` to resume. An absent setting defaults to `1`, preserving existing installs.
+Only `0` and `1` are accepted; empty/invalid values produce a safe configuration
+error. Environment overrides follow the normal precedence.
+
+For a valid completion event, `0` exits successfully without validating delivery
+settings, looking up task names or making a network request. A topic is not required
+while disabled. Event JSON and dotenv syntax must still be valid. The normal hook
+is silent; the manual test explicitly reports disabled status and that nothing was
+sent. It never bypasses the switch.
+
+This pauses the sender using this configuration, not other computers sharing the
+topic or Codex's own desktop features. Do not remove a desktop hook wrapper or clear
+the topic to pause. Resuming sends only future events, with no backlog; a setting
+change cannot recall already-sent/in-flight messages. Phone-side muting alone does
+not stop the computer from publishing.
 
 ### Limit notifications to your projects
 
@@ -168,7 +231,7 @@ macOS:
 python3 scripts/smoke_test.py
 ```
 
-**This sends one real notification** using your local topic and a harmless
+**When enabled and in scope, this attempts one real notification** using your local topic and a harmless
 synthetic event. The notification body uses Chinese labels; no Codex task or AI
 API is invoked. Expected display:
 
@@ -184,7 +247,9 @@ The sender is silent on success. Check both stderr and your phone: exit code zer
 alone does not prove delivery. Provider errors also return zero to keep the Codex
 turn successful. Missing/bad local configuration or input returns `2`.
 If project scope is enabled, include this sender's repository location before
-running the smoke test, or its synthetic event is intentionally skipped.
+running the smoke test, or its synthetic event is intentionally skipped. Disabled
+notifications or an excluded test directory produce an explicit skip message;
+neither is evidence of phone delivery.
 
 ## 5. Configure Codex's official hook
 
@@ -342,6 +407,7 @@ apply; they cannot detect arbitrary confidential prose.
 
 | Symptom | Check |
 | --- | --- |
+| Manual test says notifications are disabled | Set `CODEX_NOTIFY_ENABLED=1` in the sender's `.env`; check environment overrides |
 | `NTFY_TOPIC is required` or template error | Edit the sender's `.env`, remove stale/empty environment overrides |
 | Invalid `.env` / UTF-8 error | Check reported line, matching quotes, encoding and file permissions |
 | HTTP 401/403 | Topic permissions, server account and optional token |

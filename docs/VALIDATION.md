@@ -17,6 +17,9 @@ Full cross-device V1 acceptance remains bounded by the
 [real-environment checklist](#real-environment-acceptance-checklist). Historical
 sections below retain the results and limitations of each tested revision; they
 do not describe the current test count or supersede later receipt confirmations.
+The local master-switch follow-up below records offline validation and a later
+manual pause/resume check with Xiaomi receipt. It does not extend published CI
+evidence or the earlier real-Codex-turn and lock-screen checks to the new revision.
 
 ## Initial implementation: local checks (2026-09-20)
 
@@ -236,6 +239,44 @@ normally on Xiaomi. This completes the final receipt check for the current
 Windows machine. Exact latency/count and lock-screen/network variations were
 not newly measured. The local Windows-to-Xiaomi use case is accepted and enters
 maintenance; broader device acceptance remains limited to the checklist below.
+
+## Local master-switch checks (2026-09-23)
+
+Decision 018 adds `CODEX_NOTIFY_ENABLED` with default enabled behavior and a
+disabled path before delivery validation/metadata/network work. The manual smoke
+test shares the hook's event handler and explicitly reports disabled/scope skips.
+README now includes a new-computer checklist, topic/device changes and pause/resume
+instructions. Existing private configuration and user-level hook were not changed.
+
+Windows/Python 3.14.6: **91 offline tests passed**, including 12 added checks for
+switch defaults/invalid values, both directions of environment precedence,
+next-invocation file changes, disabled operation without a topic or delivery
+validation, input/dotenv errors, and smoke success/skip/error paths. A subprocess
+check runs the disabled smoke script from another directory under a path containing
+spaces and Unicode. Tests use fake configuration and publish no real notifications.
+Compilation, Python 3.10 AST compatibility, documentation examples/local links
+and `git diff --check` passed.
+
+At this local validation stage, the changes had not been published and
+cross-platform CI had not run. For the published revision, check its
+[workflow result](https://github.com/xuqiang97/codex-notify/actions/workflows/tests.yml);
+earlier workflow/receipt records validate their own revisions. The manual phone
+check is recorded below. The switch does not change message content,
+TLS, the provider's timeout/failure behavior or default task-name/scope settings.
+
+### Manual pause/resume check (2026-09-24)
+
+The user edited only the local master switch for this check. With effective
+`CODEX_NOTIFY_ENABLED=0`, `scripts/smoke_test.py` explicitly reported disabled
+notifications and that nothing was sent, then exited `0`. This is sender-side
+skip evidence, not a measurement of absence of all phone notifications.
+
+After the user changed the setting to `1`, the effective enabled value was checked
+and the smoke test ran once without a sender error. The user confirmed receiving
+the manual notification on Xiaomi. Exact latency/count were not newly measured;
+receipt of the separate real Codex turn notification was not explicitly confirmed.
+The effective switch was left enabled. No topic/token, private configuration,
+original notification text or backup file is included in this record.
 
 ## Real-environment acceptance checklist
 

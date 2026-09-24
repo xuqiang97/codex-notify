@@ -1,19 +1,20 @@
 """Optional REAL publish of a harmless synthetic Codex event; not a unit test."""
 
-import json
 from pathlib import Path
-import subprocess
 import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import notify
 
 
 def main() -> int:
-    script = Path(__file__).resolve().parents[1] / "notify.py"
     event = {
         "type": "agent-turn-complete",
-        "cwd": str(script.parent),
+        "cwd": str(ROOT),
     }
-    print("Sending one test event using your local configuration. Check stderr and your phone.")
-    return subprocess.run([sys.executable, str(script), json.dumps(event)], check=False).returncode
+    print("Testing notification delivery using your local configuration. Check output and your phone.")
+    return notify.handle_event(event, report_skips=True)
 
 
 if __name__ == "__main__":

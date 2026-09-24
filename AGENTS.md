@@ -94,6 +94,8 @@ notify.py
   |
   +--> ignore unsupported event types
   |
+  +--> load config and skip if notifications are disabled
+  |
   +--> derive metadata
   |      - device name
   |      - project name
@@ -161,6 +163,21 @@ This opt-in handles observed desktop internal-task noise without guessing from
 assistant JSON, hexadecimal directory names, prompt text or undocumented source
 fields. Internal tasks running inside an allowed root are not distinguished.
 Do not inspect transcripts/databases or build a background classifier for this.
+
+### 5.5 Local master switch
+
+`CODEX_NOTIFY_ENABLED` accepts only `0` or `1`, defaults to `1`, and follows the
+normal process-environment-over-dotenv precedence. For a valid supported event,
+`0` exits silently with code `0` before provider/topic/metadata/scope validation,
+hostname lookup, task-title lookup or network I/O. Do not require a topic while
+disabled. Input parsing and dotenv syntax errors remain errors; unsupported events
+still skip before config loading. Missing/empty/invalid switch values must not be
+conflated: missing enables compatibility, empty/invalid returns configuration error.
+
+The manual smoke test uses the same delivery path and respects the switch; report
+disabled or out-of-scope skips explicitly, never as successful phone delivery.
+Resuming handles future events only, without replay or cancelling in-flight sends.
+Do not modify the desktop hook wrapper to implement this switch (Decision 018).
 
 ## 6. Notification content
 
@@ -279,6 +296,7 @@ V1 supports process-environment configuration and an optional `.env` file beside
 Supported sender settings (see README for value constraints):
 
 ```text
+CODEX_NOTIFY_ENABLED=1
 CODEX_NOTIFY_PROVIDER=ntfy
 NTFY_SERVER=https://ntfy.sh
 NTFY_TOPIC=<high-entropy-topic>
@@ -303,7 +321,8 @@ Keep `.env` Git-ignored and preserve it when updating an existing installation.
 The parser handles literal `KEY=value`, matching quotes, blank lines and full-line
 comments. Do not silently add interpolation, shell execution or a dotenv dependency.
 
-The required secret-like value is `NTFY_TOPIC`. If it is missing, do not send anything; report a clear local configuration error.
+When enabled, `NTFY_TOPIC` is required. If it is missing, do not send anything;
+report a clear local configuration error. Disabling skips this validation.
 
 ## 9. Provider architecture
 
@@ -402,7 +421,7 @@ Requirements:
 
 Preserve the existing exit behavior:
 
-- `0`: successful publish, unsupported event, explicit scope skip or caught provider failure;
+- `0`: successful publish, unsupported event, disabled sender, explicit scope skip or caught provider failure;
 - `2`: malformed/missing input or invalid/missing required configuration.
 
 Provider failures produce a short sanitized stderr diagnostic. Exit `0` alone
@@ -485,6 +504,8 @@ At minimum test:
 13. network timeout/provider error;
 14. no user input or assistant reply enters the outgoing request, including with
     obsolete preview settings, JSON credentials, business prose and missing metadata.
+15. master switch defaults, invalid values, precedence, disabled operation without
+    a topic or metadata/network access, next-invocation changes and smoke skip messages.
 
 Prefer `unittest` and `unittest.mock` so tests can run without third-party dependencies.
 
@@ -563,3 +584,19 @@ For documentation-only edits, validate changed examples, links and the Git diff;
 unchanged runtime code does not require another manual phone test. Keep detailed
 test results and receipt evidence in `docs/VALIDATION.md`, including their dates
 and limits, instead of duplicating changing test counts throughout the docs.
+
+## 19. New-computer setup and local configuration changes
+
+Inspect existing `.env` and user-level hook configuration before setup. Preserve
+and privately back up existing configuration; never copy the template over it or
+reuse another computer's entire Codex config. Resolve actual Python/sender/helper
+paths and preserve desktop wrappers. The user enters real topics/tokens locally;
+do not request them in chat or expose them through commands or logs.
+
+For another computer owned by the same person, explain that an existing personal
+topic and phone subscription can be reused with a different non-sensitive device
+alias. Keep default scope `[]`; enable task names only with explicit consent.
+Run offline tests separately from manual smoke/real-turn phone verification, and
+record only the evidence actually observed. When changing everyday settings,
+explain next-invocation loading and environment overrides. Pausing must use the
+master switch, not broken credentials or removal of an unrelated desktop handler.

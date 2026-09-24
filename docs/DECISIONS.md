@@ -382,6 +382,29 @@ task-title lookup, event filtering, provider behavior and per-machine directory
 scope. Metadata can itself be sensitive; this decision does not promise otherwise.
 Any phase-two reply-preview feature requires a new design and privacy review.
 
+## Decision 018 — Local notification master switch
+
+**Status:** Accepted after the user requested convenient pause/resume alongside
+new-computer setup and everyday configuration instructions.
+
+Add `CODEX_NOTIFY_ENABLED`, default `1` for compatibility, with only `0` and `1`
+accepted. Apply the existing process-environment-over-dotenv precedence. After
+validating a supported event and reading settings, `0` returns success before
+validating delivery settings, reading metadata or publishing. No topic is required
+while paused. Malformed input/dotenv or an invalid switch still reports a safe
+local error. Unsupported events continue to skip before config loading.
+
+The manual smoke test shares the normal delivery path and explicitly reports a
+disabled or out-of-scope skip. It does not force a publish. Changes apply on the
+next invocation; resuming does not replay past events or recall in-flight messages.
+The switch affects this sender configuration, not other computers on the same
+topic or the desktop's own hook handler. Do not clear credentials, rewrite the
+Codex hook or add a persistent service to pause delivery.
+
+README owns the new-computer checklist and everyday settings instructions. No
+automatic configuration wizard, new provider, preview content or history store
+is introduced. Defaults and existing enabled behavior remain unchanged.
+
 ## Changing these decisions
 
 A future contributor may propose a change, but should:

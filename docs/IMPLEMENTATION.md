@@ -39,11 +39,15 @@ Unknown fields are tolerated; missing optional metadata uses safe fallbacks.
 
 For a supported event, the sender:
 
-1. Loads local configuration.
-2. Applies optional project scope using the event's `cwd`.
-3. Builds device/project/optional task metadata with privacy checks.
-4. Dispatches the `Notification` through `send_notification(config, notification)`.
-5. Returns the defined exit code, with sanitized diagnostics for expected errors.
+1. Reads local settings and checks the master switch; disabled operation returns immediately.
+2. Validates delivery configuration only when enabled.
+3. Applies optional project scope using the event's `cwd`.
+4. Builds device/project/optional task metadata with privacy checks.
+5. Dispatches the `Notification` through `send_notification(config, notification)`.
+6. Returns the defined exit code, with sanitized diagnostics for expected errors.
+
+`main()` owns CLI input parsing. `handle_event()` is the shared delivery path used
+by the hook and manual smoke test, so the latter cannot bypass pause/scope settings.
 
 `last-assistant-message` and `input-messages` are never used to build, name or
 classify notifications. No reply preview, summary builder, generic reply fallback
@@ -56,6 +60,15 @@ Precedence is **sender process environment > `.env` beside `notify.py` > default
 An explicitly empty environment value overrides the file. Missing `.env` permits
 environment-only configuration; malformed syntax remains a local error. Never
 read an unrelated working project's `.env` or expose topic/token values in errors.
+
+`CODEX_NOTIFY_ENABLED` defaults to `1`; only `0` and `1` are valid after trimming
+whitespace. `load_config()` returns `None` when disabled, before validating delivery
+settings or accessing metadata. `handle_event()` returns `0` for that result. A
+disabled sender needs no topic and performs no network request. Invalid event JSON,
+dotenv syntax and switch values remain errors. Unsupported events bypass config.
+The smoke test requests human-readable skip messages; the ordinary hook is silent.
+Configuration is read once per event; saved changes apply to the next invocation.
+There is no backlog to replay on resume or mechanism to recall in-flight messages.
 
 The parser reads literal `KEY=value` lines, matching quotes, blank lines and
 full-line comments, with UTF-8 BOM/CRLF support. It does not execute, interpolate
@@ -134,7 +147,7 @@ a persistent background service. Process startup/scheduling is outside that wait
 | Outcome | Exit | Diagnostic |
 | --- | --- | --- |
 | Publish completes | `0` | None |
-| Unsupported event or explicit scope skip | `0` | None |
+| Unsupported event, disabled sender or explicit scope skip | `0` | None in hook; smoke reports disabled/scope skips |
 | Expected provider/network failure or timeout | `0` | Short sanitized stderr message |
 | Missing/malformed input or invalid/missing required configuration | `2` | Short sanitized stderr message |
 
@@ -150,6 +163,8 @@ in README. Keep coverage for:
 
 - Event parsing, malformed/deep JSON, unsupported events and missing optional fields.
 - Environment precedence, dotenv syntax, invalid configuration and hostname fallback.
+- Master switch defaults/validation/precedence, no delivery work while disabled,
+  next-invocation changes and explicit manual-test skips.
 - Windows/POSIX/UNC project names, optional scope, component boundaries and cwd fallback.
 - Unicode, whitespace, truncation and privacy checks before truncation.
 - Task-name opt-in, exact matching, latest rename, bounded index reads and safe fallbacks.
