@@ -379,3 +379,52 @@ installation. These results do not complete the broader cross-device V1 matrix.
 No topic, token, original notification content or private configuration is included
 here. No runtime code was changed. Only this sanitized validation record is
 published; the sender settings, user-level hook and private backup remain local.
+
+## Local delivery diagnostics — 2026-09-28
+
+Decision 020 adds automatic, bounded `.notify-logs/` start/result records without
+changing event eligibility, notification content, task-title defaults, project
+scope, or the single-attempt network policy. Configuration and provider failures
+gain safe categories; unexpected event-handling errors receive a fixed diagnostic
+and return 0 without exposing the original exception. The existing private `.env`
+and user-level desktop wrapper were not edited.
+
+Windows / Python 3.14.6: **118 offline tests passed**, including 25 new diagnostic
+and transport checks. All application logs created by tests were isolated in
+temporary directories; no test calls were written to everyday sender logs and no
+real notifications were sent. Coverage includes:
+
+- Start/result lifecycle, UTC timestamps, duration, explicit HTTP acceptance,
+  disabled/unsupported/scope skips, input/configuration/provider/internal errors,
+  manual source, missing titles and unchanged one-publish behavior.
+- Fixed-field privacy, omission of prompts/replies/names/paths/topics/tokens/raw
+  IDs and exception text, hashed event correlation with distinct invocation IDs,
+  and no extra delivery metadata access while disabled.
+- DNS/TLS/socket/generic-network categories and HTTP status preservation,
+  including a response-cleanup error that must not emit a thread traceback.
+- Fourteen UTC-date retention boundaries, per-segment/total size limits, rotation,
+  oldest-first pruning, preservation of unrelated files, and recovery from a
+  partial trailing record.
+- Six concurrent writer processes with complete, parseable records without
+  rotation; concurrent rotation with parseable retained records and size limits.
+- Busy-lock timeout, lock release after forced exit of a synthetic test helper,
+  unwritable storage, log-thread startup failure, simulated stuck disk and bounded
+  caller exit. A subprocess with a 60-second fake log write exited within the
+  test's five-second bound, without publishing.
+
+Compilation and Python 3.10 AST syntax compatibility passed. README's three TOML
+examples, local documentation links, private-config/log Git-ignore checks and
+`git diff --check` passed. The CI compilation command now includes diagnostics.py.
+
+At the pre-publication checkpoint, these were local results; the Windows file-lock
+path was exercised. Cross-platform execution is checked separately by the
+Windows/macOS and Python 3.10/3.13 CI matrix on the published revision.
+
+A subsequent actual completed turn produced one matching Hook start/result pair
+at 15:21:25–15:21:26 Beijing time on 2026-09-28. Its hashed thread reference matched
+the current conversation locally, and the result recorded `http_accepted` with
+HTTP 200. Only this sanitized observation is published; original records and
+identifiers remain local. Phone receipt for this change has not been confirmed
+by the user. HTTP acceptance does not establish phone receipt, and logging is
+best effort rather than a full audit trail. No historical events are retroactively
+reconstructed.

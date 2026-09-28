@@ -1,6 +1,7 @@
 # Local configuration / secrets
 .env*
 !.env.example
+.notify-logs/
 
 # Python
 __pycache__/

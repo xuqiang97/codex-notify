@@ -17,6 +17,7 @@ the accepted installation.
 codex-notify/
 ├── notify.py                 # CLI, config, scope, metadata and dispatch
 ├── task_metadata.py          # Optional bounded task-title lookup
+├── diagnostics.py           # Bounded, local-only invocation diagnostics
 ├── providers/
 │   ├── __init__.py           # Notification and error types
 │   └── ntfy.py               # Provider config, HTTPS request and deadline
@@ -48,6 +49,9 @@ For a supported event, the sender:
 
 `main()` owns CLI input parsing. `handle_event()` is the shared delivery path used
 by the hook and manual smoke test, so the latter cannot bypass pause/scope settings.
+Both enter a diagnostic attempt and share `_handle_event()` for dispatch. Input
+errors also receive a diagnostic result; the caller supplies `hook` or `manual`
+as a fixed source label, never an event-provided string.
 
 `last-assistant-message` and `input-messages` are never used to build, name or
 classify notifications. No reply preview, summary builder, generic reply fallback
@@ -67,6 +71,8 @@ settings or accessing metadata. `handle_event()` returns `0` for that result. A
 disabled sender needs no topic and performs no network request. Invalid event JSON,
 dotenv syntax and switch values remain errors. Unsupported events bypass config.
 The smoke test requests human-readable skip messages; the ordinary hook is silent.
+Minimal local start/skip records still apply while disabled; no event IDs are
+hashed and no delivery metadata is accessed on that path.
 Configuration is read once per event; saved changes apply to the next invocation.
 There is no backlog to replay on resume or mechanism to recall in-flight messages.
 
@@ -139,6 +145,10 @@ The provider POSTs UTF-8 JSON to the server root with `topic`, `title`, `message
 normal `priority: 3` and `tags: ["computer"]`. Optional authentication uses the
 Authorization header. The complete JSON envelope is bounded to 4,096 bytes.
 Responses are closed without reading their bodies; non-2xx status is a failure.
+Successful transport returns the numeric HTTP status for diagnostics. Provider
+errors add fixed categories and optional HTTP status while retaining their safe
+stderr messages. The notification's task-title inclusion flag stays local and
+does not change the outgoing JSON fields.
 
 There is one attempt per eligible invocation and no retry. The configured timeout
 (default 5 seconds, greater than 0 and at most 30) bounds both the socket wait and
@@ -152,11 +162,46 @@ a persistent background service. Process startup/scheduling is outside that wait
 | Unsupported event, disabled sender or explicit scope skip | `0` | None in hook; smoke reports disabled/scope skips |
 | Expected provider/network failure or timeout | `0` | Short sanitized stderr message |
 | Missing/malformed input or invalid/missing required configuration | `2` | Short sanitized stderr message |
+| Unexpected exception in event handling | `0` | Fixed internal-error message; no original exception text/traceback |
 
 Do not echo raw events, config values, HTTP response bodies or underlying network
 exception text. Provider failures must not turn a completed Codex turn into an
 apparent task failure. Exit `0` alone is not proof of receipt; timeout leaves
 delivery unknown. There is no deduplication store or exactly-once guarantee.
+
+### Local diagnostic storage
+
+`diagnostics.Attempt` enqueues a `started` record and a `finished` result with UTC
+timestamps, a random invocation ID, elapsed time and explicitly allowlisted scalar
+fields. Only enabled, validated events may add hashed thread/turn correlation.
+Thread UUIDs are lowercased before hashing; the event hash additionally uses a NUL
+separator and a bounded ASCII turn ID. Invalid/missing IDs produce no invented
+event reference. No notification/event text or original exception objects enter
+the writer. No title-lookup internals are collected; only the inclusion flag.
+
+Every invocation owns a daemon writer, not a persistent service. File operations
+run only in that worker; delivery never waits for disk access. Shutdown joins for
+at most 150 ms. Startup/I/O errors are ignored by diagnostics and do not alter the
+sender result. The worker takes a nonblocking OS lock (`msvcrt` on Windows,
+`fcntl` on macOS/POSIX), retrying contention for at most 50 ms, and releases it
+after append/cleanup. Process exit releases the OS lock even after a crash.
+
+Under the lock, `.notify-logs/YYYY-MM-DD.jsonl` is capped at 1 MiB with one same-day
+`.1.jsonl` preceding segment. Old dates beyond the current UTC day plus previous
+13 are removed on writes; oldest owned files are then pruned to keep total JSONL
+data within 4 MiB. Logs and the tiny persistent lock file are Git-ignored. Never
+delete unrelated files; stop logging on symlinked storage/owned log paths. No
+cleanup timer runs while the sender is idle. Retention/capacity and best-effort
+flush mean records can be missing; readers should tolerate incomplete last lines
+after abrupt exit. Before appending, discard a bounded incomplete trailing record
+in the active segment so it does not corrupt later records. This is diagnostic
+evidence, not a transaction/audit guarantee.
+
+`publish_ms` measures the caller's wait for the single provider attempt, not the
+phone's latency. `http_accepted` only establishes HTTP 2xx. Network categories are
+based on Python's observed exception; generic errors remain generic. A late worker
+result after a delivery timeout does not replace the recorded unknown outcome.
+Hook launch failures before this code runs cannot be recorded here.
 
 ## 6. Regression and publication checks
 
@@ -173,6 +218,9 @@ in README. Keep coverage for:
 - No reply/input content in requests or diagnostics, including with obsolete settings.
 - JSON request formation, auth, TLS/network errors, redirect refusal, size and deadlines.
 - CLI invocation from another working directory and paths containing spaces/Unicode.
+- Diagnostic lifecycle/privacy, independent invocation/event references, safe
+  error categories, concurrent append/rotation and bounded retention; log-thread,
+  filesystem and lock failures cannot block delivery. Tests isolate all log files.
 
 Automated tests use fake configuration and mock transport; in-process sockets/DNS
 are blocked. Never run the real smoke script as part of test discovery. GitHub

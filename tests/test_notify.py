@@ -25,6 +25,9 @@ class OfflineTest(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch("socket.socket", side_effect=AssertionError("tests must be offline")).start()
         patch("socket.getaddrinfo", side_effect=AssertionError("tests must be offline")).start()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        patch("diagnostics.LOG_DIR", Path(temporary.name) / "logs").start()
 
 
 class EventTests(OfflineTest):
@@ -452,6 +455,7 @@ class CliTests(OfflineTest):
             script = Path(directory) / "notify.py"
             shutil.copyfile(ROOT / "notify.py", script)
             shutil.copyfile(ROOT / "task_metadata.py", Path(directory) / "task_metadata.py")
+            shutil.copyfile(ROOT / "diagnostics.py", Path(directory) / "diagnostics.py")
             shutil.copytree(ROOT / "providers", Path(directory) / "providers",
                             ignore=shutil.ignore_patterns("__pycache__"))
             result = subprocess.run([sys.executable, str(script), '{"type":"unsupported"}'],
@@ -462,17 +466,28 @@ class CliTests(OfflineTest):
         with tempfile.TemporaryDirectory(prefix="codex notify ") as directory:
             # This hostile cwd config must never be read by the script.
             Path(directory, ".env").write_text("THIS FILE MUST NOT BE LOADED", encoding="utf-8")
-            environment = dict(os.environ, NTFY_TOPIC="", CODEX_NOTIFY_PROVIDER="ntfy")
+            clone = Path(directory) / "sender"
+            clone.mkdir()
+            for name in ("notify.py", "task_metadata.py", "diagnostics.py"):
+                shutil.copyfile(ROOT / name, clone / name)
+            shutil.copytree(ROOT / "providers", clone / "providers",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+            environment = dict(os.environ, NTFY_TOPIC="", CODEX_NOTIFY_PROVIDER="ntfy", CODEX_NOTIFY_ENABLED="1")
             for args, expected in (([], 2), (["invalid private input"], 2),
                                    (['{"type":"unsupported"}'], 0),
                                    (['{"type":"agent-turn-complete"}'], 2)):
-                result = subprocess.run([sys.executable, str(ROOT / "notify.py"), *args],
+                result = subprocess.run([sys.executable, str(clone / "notify.py"), *args],
                                         cwd=directory, env=environment, capture_output=True,
                                         text=True, timeout=5)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(result.stdout, "")
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertNotIn("private input", result.stderr)
+            rows = [json.loads(line) for path in (clone / ".notify-logs").glob("*.jsonl")
+                    for line in path.read_text(encoding="ascii").splitlines()]
+            self.assertEqual([row["outcome"] for row in rows if row["phase"] == "finished"],
+                             ["input_error", "input_error", "unsupported_event", "configuration_error"])
+            self.assertFalse((Path(directory) / ".notify-logs").exists())
 
 
 if __name__ == "__main__":

@@ -440,7 +440,8 @@ upgrading if you want project-only notifications. Environment overrides still wi
   their disclosure is inappropriate. Removing reply previews does not anonymize
   metadata. No source files, diffs or conversations are read from disk; the
   optional task-name lookup only reads the bounded local index described above.
-  No content is written to application logs.
+  Local diagnostic logs contain only the fixed operational fields described below,
+  never notification or conversation content.
 - HTTPS certificate verification stays enabled. HTTP, URL credentials, query
   strings and redirects are rejected. Topics go in the JSON body, tokens only in
   the Authorization header. Errors never echo the payload, config values, URL,
@@ -454,6 +455,71 @@ upgrading if you want project-only notifications. Environment overrides still wi
   DNS/slow headers from keeping the CLI alive beyond the timeout (apart from
   process startup/scheduling). On timeout delivery is unknown; retrying manually
   could duplicate a message. This is a best-effort convenience notification.
+
+## Local diagnostic logs
+
+Each invocation now records a small `started` / `finished` pair in **`.notify-logs/`
+beside the sender**, automatically from the next invocation. No `.env` or hook
+change or app restart is needed. Logs are local and Git-ignored; they are never
+uploaded by the sender. This does not filter background tasks or alter delivery.
+
+Files are UTF-8-compatible JSON Lines named by **UTC date**, for example
+`2026-09-28.jsonl`; `.1.jsonl` is that day's preceding size segment. Timestamps
+include `+00:00` (add eight hours for Beijing time). On each successful log write,
+retain the current UTC date and previous 13 dates, at most 1 MiB per segment and
+4 MiB of log data in total. Size limits may discard records sooner. Cleanup only
+runs during invocations; with no further activity old files remain on disk.
+The small `writer.lock` file is normal and does not need manual removal.
+
+Records contain a random invocation ID, `source` (`hook` or `manual`), timestamp,
+phase and, at completion, `elapsed_ms` and the outcome:
+
+`elapsed_ms` excludes Python startup and the final diagnostic flush; `publish_ms`
+measures the single provider call, not phone receipt latency.
+
+| Outcome | Meaning |
+| --- | --- |
+| `http_accepted` | ntfy returned HTTP 2xx; **not proof of phone receipt** |
+| `unsupported_event`, `disabled`, `out_of_scope` | Explicit skip; no publish attempt |
+| `input_error`, `configuration_error` | Input/configuration prevented delivery; safe `error_code` identifies the category/setting |
+| `provider_error` | Publishing failed or timed out; HTTP status or a safe network category is recorded when known |
+| `internal_error` | Unexpected program error; delivery is not confirmed; no raw exception or traceback is logged |
+
+An attempted publish also records `publish_ms`, configured `timeout_ms`, and
+whether a task title was included. `http_status` is recorded when available.
+Network categories distinguish `http_error`, `dns_error`, `tls_error`,
+`socket_timeout`, generic `network_error`, `delivery_timeout`, and oversized
+payloads. A timeout still means **delivery is unknown**, with no automatic retry.
+Categories reflect the exception available to Python, not a precise network trace.
+
+For enabled, validated calls with suitable IDs, `thread_ref` is the first 24 hex
+characters of SHA-256 of the lowercased thread UUID. `event_ref` hashes that UUID,
+a NUL separator, and the exact turn ID; it is omitted without a usable turn ID.
+Repeated event references with different invocation IDs help identify repeated
+calls; they are not deduplication or guaranteed globally unique identities. These
+are correlation hashes, not encryption; treat the local logs as private metadata.
+
+Never logged: raw Hook payloads, prompts/replies, notification bodies, task/project/
+device names, directory paths, raw thread/turn IDs, topics/tokens, server responses,
+or raw exception text. Missing task names still notify and are not errors; only
+their inclusion flag is recorded, not the detailed title-lookup reason. Disabled
+and unsupported calls do not load extra metadata for diagnostics.
+
+Writing happens in a short-lived daemon thread, with an OS file lock to prevent
+concurrent append/rotation corruption. Nothing waits for logging before sending;
+after handling the event, exit waits at most an additional 150 ms for diagnostics
+(apart from process startup/scheduling). Lock contention is retried only for local
+logging for up to 50 ms; this is **not** a notification retry. Busy/unwritable disks,
+lock contention and abrupt exit can lose records; a logging failure never changes
+delivery or its exit code. No persistent service, database or log collector runs.
+
+For a later investigation, provide the approximate local time, project and symptom;
+inspect only the relevant log window locally rather than sharing all logs. A
+`started` record without `finished` is inconclusive: interruption or lost logging
+are both possible. No record cannot distinguish an uninvoked sender from failed
+logging. Hook/Python startup failures still require desktop/configuration evidence,
+and phone receipt still requires phone-side evidence. Older events cannot be
+reconstructed retroactively from these new logs.
 
 ## Troubleshooting
 
@@ -506,7 +572,7 @@ types in `providers/__init__.py`. Optional task-title lookup is isolated in
 
 ```console
 python -m unittest discover -v
-python -m compileall -q notify.py task_metadata.py providers tests scripts
+python -m compileall -q notify.py task_metadata.py diagnostics.py providers tests scripts
 git diff --check
 ```
 

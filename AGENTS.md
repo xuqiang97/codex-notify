@@ -178,6 +178,8 @@ The manual smoke test uses the same delivery path and respects the switch; repor
 disabled or out-of-scope skips explicitly, never as successful phone delivery.
 Resuming handles future events only, without replay or cancelling in-flight sends.
 Do not modify the desktop hook wrapper to implement this switch (Decision 018).
+Decision 020 permits minimal local invocation/skip diagnostics while disabled;
+do not hash event IDs, look up metadata or validate delivery settings for logging.
 
 ## 6. Notification content
 
@@ -333,6 +335,7 @@ Preserve the current lightweight boundaries:
 ```text
 notify.py
 task_metadata.py
+diagnostics.py
 providers/
   __init__.py
   ntfy.py
@@ -362,6 +365,10 @@ Core code owns:
 
 `task_metadata.py` owns only the optional bounded task-title lookup. Provider-neutral
 `Notification`, `ConfigurationError` and `ProviderError` live in `providers/__init__.py`.
+`diagnostics.py` owns bounded local logging only. Provider errors carry safe fixed
+codes and optional HTTP status; a successful send returns its numeric HTTP status.
+`Notification.task_title_included` is a local diagnostic flag, not an added field
+in the outgoing ntfy JSON envelope.
 
 Do not build a plugin framework with dynamic package loading for V1.
 
@@ -424,11 +431,41 @@ Preserve the existing exit behavior:
 - `0`: successful publish, unsupported event, disabled sender, explicit scope skip or caught provider failure;
 - `2`: malformed/missing input or invalid/missing required configuration.
 
+Unexpected exceptions in the event handling path also return `0`, with a fixed
+sanitized internal-error diagnostic and no raw traceback. This is not success or
+receipt evidence. Do not catch `BaseException` or change malformed-input/config exits.
+
 Provider failures produce a short sanitized stderr diagnostic. Exit `0` alone
 does not prove delivery. On timeout delivery is unknown; do not add automatic
 retries or promise exactly-once delivery. There is no deduplication store.
 
 Tests must cover provider failure.
+
+### 11.1 Local sender diagnostics (Decision 020)
+
+Record a small `started` / `finished` JSONL pair per invocation in the Git-ignored
+`.notify-logs/` beside the sender, without new configuration or a background service.
+Allow only UTC time, schema/source/phase, random invocation ID, fixed outcome/error
+codes, elapsed/publish/timeout milliseconds, optional HTTP status, task-title
+inclusion flag, and hashes of suitable event IDs. Never log names, full paths,
+raw IDs, raw Hook JSON, prompts/replies, notification content, topics/tokens,
+server bodies or original exception text. Correlation hashes are private metadata,
+not encryption. Do not add source reads or background-task classification.
+
+Keep the current UTC date and previous 13 dates on later writes, with 1 MiB per
+segment and 4 MiB total log data; capacity can shorten retention. Only clean up
+owned log files. Without future invocations there is no timed cleanup. Use a
+cross-process OS lock for append/rotation; never use a stale lock-directory scheme.
+Write in a short-lived daemon worker, without waiting before delivery and with
+at most 150 ms final flush wait. Lock waits are bounded to 50 ms. Log I/O, startup
+or contention failures must not prevent or retry a notification, change its exit
+code, or expose private details. Lost/partial records are possible.
+
+`http_accepted` means HTTP 2xx, never phone receipt. A timeout means delivery is
+unknown. No record does not prove the Hook was never called; an incomplete pair
+does not prove sending failed. Startup failures before Python runs still need
+desktop-side evidence. Tests must use isolated temporary logs and fake/mocked
+delivery, including subprocess tests; never mix test calls into everyday logs.
 
 ## 12. Cross-platform rules
 
@@ -506,6 +543,9 @@ At minimum test:
     obsolete preview settings, JSON credentials, business prose and missing metadata.
 15. master switch defaults, invalid values, precedence, disabled operation without
     a topic or metadata/network access, next-invocation changes and smoke skip messages.
+16. diagnostic privacy, distinct outcomes, event correlation, time/size retention,
+    concurrent writes/rotation, crash-released locks, bounded flush and failures
+    that do not affect delivery; unknown event-handling errors remain sanitized.
 
 Prefer `unittest` and `unittest.mock` so tests can run without third-party dependencies.
 

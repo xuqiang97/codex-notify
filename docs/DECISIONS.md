@@ -424,6 +424,41 @@ Retain the bounded exact-thread local index lookup, privacy checks and graceful
 project-only fallback. Explicit `0` performs no title lookup. Do not expand to
 transcripts, prompts, replies or other metadata sources. No other defaults change.
 
+## Decision 020 — Bounded local delivery diagnostics
+
+**Status:** Accepted on 2026-09-28 after the user requested the proposed lightweight
+logging improvement for later investigation of missing, delayed or extra notices.
+
+The prior sender emitted safe stderr diagnostics but kept no durable record of
+successful attempts, silent skips or timings. Desktop logs helped correlate two
+background suggestion turns but could not prove each outgoing publish. Add local
+operational evidence without changing event eligibility, message content, scope,
+the desktop wrapper, network attempts or metadata lookup sources.
+
+Write small start/result JSONL records in Git-ignored `.notify-logs/` beside the
+sender. Use fixed outcomes/error codes, UTC timestamps, timing, optional HTTP
+status, task-title inclusion, a random invocation ID and hashed valid event IDs.
+Do not save original Hook payloads, text, names, paths, IDs, credentials or raw
+exceptions. Hashes are correlation aids rather than encryption or deduplication.
+Logs are automatically active, including minimal records for disabled/unsupported
+calls; those paths still bypass delivery metadata and event-ID hashing. No new
+setting or source-classification feature is introduced.
+
+Keep at most 14 UTC dates during active use, 1 MiB per segment and 4 MiB in total;
+size pressure may shorten retention and cleanup requires a later invocation.
+Use an OS-released cross-process file lock with bounded contention wait, and a
+short-lived daemon writer. Never wait for disk before delivery; final diagnostic
+flush adds at most 150 ms of waiting. Any diagnostic failure must leave delivery
+and exit behavior intact. This does not add a database, persistent daemon,
+collector, dashboard or task-history service.
+
+Unexpected exceptions within event handling now produce a fixed internal-error
+diagnostic and return 0, preserving best-effort notification semantics without
+printing raw traceback details. Expected input/config errors still return 2.
+HTTP acceptance is not mobile receipt, timeouts remain unknown, and missing or
+incomplete records are inconclusive. Do not claim complete auditing or exactly-once
+delivery, and do not filter `ambient_suggestions` using these records.
+
 ## Changing these decisions
 
 A future contributor may propose a change, but should:

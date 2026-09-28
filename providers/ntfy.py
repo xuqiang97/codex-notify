@@ -6,6 +6,8 @@ import json
 import math
 from queue import Empty, Queue
 import re
+import socket
+import ssl
 from threading import Thread
 from typing import Callable, Mapping
 import urllib.error
@@ -26,11 +28,11 @@ class NtfyConfig:
 def load_config(values: Mapping[str, str]) -> NtfyConfig:
     topic = values.get("NTFY_TOPIC", "").strip()
     if not topic:
-        raise ConfigurationError("NTFY_TOPIC is required")
+        raise ConfigurationError("NTFY_TOPIC is required", code="topic_missing")
     if topic == "replace-with-a-long-random-private-topic":
-        raise ConfigurationError("replace the NTFY_TOPIC template with a random private topic")
+        raise ConfigurationError("replace the NTFY_TOPIC template with a random private topic", code="topic_template")
     if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", topic):
-        raise ConfigurationError("NTFY_TOPIC must use 1-64 letters, digits, underscores or dashes")
+        raise ConfigurationError("NTFY_TOPIC must use 1-64 letters, digits, underscores or dashes", code="topic_invalid")
 
     server = values.get("NTFY_SERVER", "https://ntfy.sh").strip()
     try:
@@ -47,17 +49,19 @@ def load_config(values: Mapping[str, str]) -> NtfyConfig:
     except ValueError:
         valid = False
     if not valid:
-        raise ConfigurationError("NTFY_SERVER must be an HTTPS origin without credentials, path, query or fragment")
+        raise ConfigurationError("NTFY_SERVER must be an HTTPS origin without credentials, path, query or fragment",
+                                 code="server_invalid")
 
     token = values.get("NTFY_TOKEN", "").strip()
     if token and not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", token):
-        raise ConfigurationError("NTFY_TOKEN must be a single ASCII bearer token")
+        raise ConfigurationError("NTFY_TOKEN must be a single ASCII bearer token", code="token_invalid")
     try:
         timeout = float(values.get("CODEX_NOTIFY_TIMEOUT", "5"))
     except ValueError:
         timeout = float("nan")
     if not math.isfinite(timeout) or not 0 < timeout <= 30:
-        raise ConfigurationError("CODEX_NOTIFY_TIMEOUT must be greater than 0 and at most 30 seconds")
+        raise ConfigurationError("CODEX_NOTIFY_TIMEOUT must be greater than 0 and at most 30 seconds",
+                                 code="timeout_invalid")
     return NtfyConfig(server.rstrip("/"), topic, token, timeout)
 
 
@@ -77,7 +81,7 @@ def build_request(config: NtfyConfig, notification: Notification) -> urllib.requ
     }, ensure_ascii=False).encode("utf-8")
     # Conservatively bound the entire JSON envelope, not just the message.
     if len(body) > 4096:
-        raise ProviderError("notification exceeds the 4096-byte limit")
+        raise ProviderError("notification exceeds the 4096-byte limit", code="payload_too_large")
     headers = {"Content-Type": "application/json; charset=utf-8"}
     if config.token:
         headers["Authorization"] = "Bearer " + config.token
@@ -86,27 +90,42 @@ def build_request(config: NtfyConfig, notification: Notification) -> urllib.requ
 
 def send_notification(
     config: NtfyConfig, notification: Notification, *, opener: Callable | None = None,
-) -> None:
+) -> int:
     request = build_request(config, notification)
-    results: Queue[Exception | None] = Queue(maxsize=1)
+    results: Queue[Exception | int] = Queue(maxsize=1)
 
     def publish() -> None:
         try:
             open_request = opener or urllib.request.build_opener(_NoRedirect()).open
             with open_request(request, timeout=config.timeout) as response:
                 if not 200 <= response.status < 300:
-                    raise ProviderError("ntfy returned a non-success HTTP status")
+                    raise ProviderError("ntfy returned a non-success HTTP status", code="http_error",
+                                        http_status=response.status)
+                status = response.status
                 # No need to read a response body (which could be unbounded).
         except urllib.error.HTTPError as exc:
-            exc.close()
-            results.put(ProviderError(f"ntfy rejected the request (HTTP {exc.code})"))
-        except (OSError, urllib.error.URLError, http.client.HTTPException, ValueError):
+            try:
+                exc.close()
+            except Exception:
+                # Response cleanup must not lose the known HTTP status or print private details.
+                pass
+            results.put(ProviderError(f"ntfy rejected the request (HTTP {exc.code})",
+                                      code="http_error", http_status=exc.code))
+        except (OSError, urllib.error.URLError, http.client.HTTPException, ValueError) as exc:
             # Exception text can include a URL, token, proxy password or response.
-            results.put(ProviderError("ntfy connection failed or timed out"))
+            cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            code = "network_error"
+            if isinstance(cause, ssl.SSLError):
+                code = "tls_error"
+            elif isinstance(cause, socket.gaierror):
+                code = "dns_error"
+            elif isinstance(cause, TimeoutError):
+                code = "socket_timeout"
+            results.put(ProviderError("ntfy connection failed or timed out", code=code))
         except Exception as exc:
             results.put(exc)
         else:
-            results.put(None)
+            results.put(status)
 
     # urllib's socket timeout alone does not bound DNS or slow response headers.
     # A daemon worker bounds the CLI lifetime even if the OS resolver stalls.
@@ -114,6 +133,8 @@ def send_notification(
     try:
         error = results.get(timeout=config.timeout)
     except Empty:
-        raise ProviderError("ntfy delivery timed out; delivery status is unknown") from None
-    if error is not None:
+        raise ProviderError("ntfy delivery timed out; delivery status is unknown",
+                            code="delivery_timeout") from None
+    if isinstance(error, Exception):
         raise error
+    return error

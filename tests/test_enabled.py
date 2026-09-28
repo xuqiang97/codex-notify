@@ -138,7 +138,7 @@ class EnabledTests(OfflineTest):
     def test_smoke_script_from_other_directory_with_no_topic(self):
         with tempfile.TemporaryDirectory(prefix='notify smoke 中文 ') as directory:
             clone = Path(directory)
-            for name in ('notify.py', 'task_metadata.py'):
+            for name in ('notify.py', 'task_metadata.py', 'diagnostics.py'):
                 shutil.copyfile(ROOT / name, clone / name)
             shutil.copytree(ROOT / 'providers', clone / 'providers', ignore=shutil.ignore_patterns('__pycache__'))
             (clone / 'scripts').mkdir()

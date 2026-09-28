@@ -10,8 +10,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import socket
 import sys
+import time
 from typing import Mapping
 import unicodedata
+
+import diagnostics
 
 from providers import ConfigurationError, Notification, ProviderError
 from providers import ntfy
@@ -60,14 +63,14 @@ def load_project_roots(raw: str) -> tuple[PurePosixPath | PureWindowsPath, ...]:
     try:
         values = json.loads(raw)
     except (ValueError, RecursionError):
-        raise ConfigurationError(diagnostic) from None
+        raise ConfigurationError(diagnostic, code="scope_invalid") from None
     if not isinstance(values, list):
-        raise ConfigurationError(diagnostic)
+        raise ConfigurationError(diagnostic, code="scope_invalid")
     roots = []
     for value in values:
         path = absolute_path(value)
         if path is None:
-            raise ConfigurationError(diagnostic)
+            raise ConfigurationError(diagnostic, code="scope_invalid")
         roots.append(path)
     return tuple(roots)
 
@@ -87,7 +90,7 @@ def read_env(path: Path) -> dict[str, str]:
     except FileNotFoundError:
         return {}
     except (OSError, UnicodeError):
-        raise ConfigurationError("cannot read the local .env as UTF-8") from None
+        raise ConfigurationError("cannot read the local .env as UTF-8", code="dotenv_unreadable") from None
     values = {}
     for number, line in enumerate(contents.splitlines(), 1):
         line = line.strip()
@@ -96,10 +99,10 @@ def read_env(path: Path) -> dict[str, str]:
         key, separator, value = line.partition("=")
         key, value = key.strip(), value.strip()
         if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
-            raise ConfigurationError(f"invalid .env syntax on line {number}")
+            raise ConfigurationError(f"invalid .env syntax on line {number}", code="dotenv_syntax")
         if value.startswith(("'", '"')):
             if len(value) < 2 or value[-1] != value[0]:
-                raise ConfigurationError(f"unclosed .env quote on line {number}")
+                raise ConfigurationError(f"unclosed .env quote on line {number}", code="dotenv_syntax")
             value = value[1:-1]
         values[key] = value
     return values
@@ -113,15 +116,15 @@ def load_config(
     values.update(os.environ if environ is None else environ)
     enabled = values.get("CODEX_NOTIFY_ENABLED", "1").strip()
     if enabled not in ("0", "1"):
-        raise ConfigurationError("CODEX_NOTIFY_ENABLED must be 0 or 1")
+        raise ConfigurationError("CODEX_NOTIFY_ENABLED must be 0 or 1", code="enabled_invalid")
     if enabled == "0":
         return None
     provider = values.get("CODEX_NOTIFY_PROVIDER", "ntfy").strip().lower()
     if provider != "ntfy":
-        raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
+        raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1", code="provider_invalid")
     task_title = values.get("CODEX_NOTIFY_TASK_TITLE", "1").strip()
     if task_title not in ("0", "1"):
-        raise ConfigurationError("CODEX_NOTIFY_TASK_TITLE must be 0 or 1")
+        raise ConfigurationError("CODEX_NOTIFY_TASK_TITLE must be 0 or 1", code="task_title_invalid")
     device = values.get("CODEX_NOTIFY_DEVICE", "").strip()
     if not device:
         try:
@@ -206,50 +209,77 @@ def build_notification(event: dict, config: Config) -> Notification:
     return Notification(
         title=" · ".join(title_parts),
         message="\n".join(lines),
+        task_title_included=bool(task),
     )
 
 
-def send_notification(config: Config, notification: Notification) -> None:
+def send_notification(config: Config, notification: Notification) -> int:
     if config.provider != "ntfy":
-        raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
-    ntfy.send_notification(config.ntfy, notification)
+        raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1", code="provider_invalid")
+    return ntfy.send_notification(config.ntfy, notification)
 
 
 def handle_event(event: dict, *, report_skips: bool = False) -> int:
     """Shared delivery path for the hook and manual smoke test."""
+    with diagnostics.Attempt("manual" if report_skips else "hook") as attempt:
+        return _handle_event(event, report_skips=report_skips, attempt=attempt)
+
+
+def _handle_event(event: dict, *, report_skips: bool, attempt: diagnostics.Attempt) -> int:
     if not is_supported_event(event):
+        attempt.update(outcome="unsupported_event")
         return 0
     try:
         config = load_config()
         if config is None:
+            attempt.update(outcome="disabled")
             if report_skips:
                 print("Notifications are disabled (CODEX_NOTIFY_ENABLED=0); nothing was sent.")
             return 0
+        attempt.correlate(event)
         if not is_in_project_scope(event, config):
+            attempt.update(outcome="out_of_scope")
             if report_skips:
                 print("Test directory is outside the configured project scope; nothing was sent.")
             return 0
-        send_notification(config, build_notification(event, config))
+        notification = build_notification(event, config)
+        attempt.update(task_title_included=notification.task_title_included,
+                       timeout_ms=config.ntfy.timeout * 1000)
+        started = time.monotonic()
+        try:
+            status = send_notification(config, notification)
+        finally:
+            attempt.update(publish_ms=(time.monotonic() - started) * 1000)
+        attempt.update(outcome="http_accepted", http_status=status)
     except ConfigurationError as exc:
+        attempt.update(outcome="configuration_error", error_code=exc.code)
         print(f"codex-notify: {exc}", file=sys.stderr)
         return 2
     except ProviderError as exc:
+        attempt.update(outcome="provider_error", error_code=exc.code, http_status=exc.http_status)
         print(f"codex-notify: {exc}", file=sys.stderr)
         # Best effort: a push outage must not look like a failed Codex turn.
+        return 0
+    except Exception:
+        attempt.update(outcome="internal_error", error_code="internal_error")
+        print("codex-notify: unexpected internal error; notification delivery is not confirmed", file=sys.stderr)
         return 0
     return 0
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("codex-notify: expected one event JSON argument", file=sys.stderr)
-        return 2
-    try:
-        event = parse_event(sys.argv[1])
-    except ValueError as exc:
-        print(f"codex-notify: {exc}", file=sys.stderr)
-        return 2
-    return handle_event(event)
+    with diagnostics.Attempt() as attempt:
+        if len(sys.argv) != 2:
+            attempt.update(outcome="input_error", error_code="missing_argument")
+            print("codex-notify: expected one event JSON argument", file=sys.stderr)
+            return 2
+        try:
+            event = parse_event(sys.argv[1])
+        except ValueError as exc:
+            attempt.update(outcome="input_error", error_code="invalid_json")
+            print(f"codex-notify: {exc}", file=sys.stderr)
+            return 2
+        return _handle_event(event, report_skips=False, attempt=attempt)
 
 
 if __name__ == "__main__":
