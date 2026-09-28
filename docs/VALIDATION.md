@@ -317,3 +317,53 @@ template alignment, no title lookup for disabled/scope-skipped notifications,
 and existing privacy/fallback behavior. Compilation and `git diff --check` passed.
 No private `.env` or user-level hook configuration was changed. No manual push or
 new phone receipt was verified for this change, and no new CI result is claimed.
+
+## Additional Windows computer initialization — 2026-09-28
+
+Repository baseline: `721a4f6`, with an initially clean working tree. This is a
+separate installation from the earlier Windows acceptance record. Environment:
+Windows 11 build 26200, Python 3.14.6, desktop app 26.924.2738.0, and the running
+desktop core executable reporting `codex-cli 0.158.0-alpha.2.1`.
+
+- All 93 offline tests passed; compilation and the initial Git diff check passed.
+  These checks published nothing and do not establish a new cross-platform CI result.
+- The sender `.env` was absent and was created from the template. The user entered
+  private settings locally. Sanitized validation confirmed an enabled sender,
+  task titles enabled, unrestricted project scope, a configured device alias and
+  the hosted ntfy server. No sender-setting environment overrides were found.
+- The user-level Codex configuration was privately backed up outside the repository.
+  Its existing Computer Use `turn-ended` wrapper was preserved and configured with
+  `--previous-notify` using the actual absolute Python and sender paths. TOML,
+  nested command JSON and referenced paths were checked; unrelated configuration
+  matched the backup. An offline probe confirmed unchanged event forwarding by
+  the installed wrapper without publishing a notification.
+- At **10:26:50 UTC+08:00**, the manual smoke script ran once with exit code 0 and
+  no sender diagnostic. The user confirmed **one notification, almost no delay,
+  and the correct device alias**. Latency is qualitative, not a measured duration.
+  The synthetic event had no task ID and therefore did not test task-name display.
+- After the user reported restarting the desktop app, a real Codex turn ran only
+  `git status --short` and modified no files. The user then confirmed **one
+  notification, almost no delay, and correct device and task names**. This
+  separately confirms real-turn receipt and task-name display after restart.
+- For the background test, the user was instructed to minimize Codex and leave
+  ntfy for the phone home screen, keeping both devices unlocked. The real turn
+  waited 30 seconds, ran only `git status --short`, and modified no files. The
+  user confirmed **one notification with almost no delay**. This is user-reported
+  receipt under the requested background procedure, not independent observation
+  of the devices' UI state or a measured latency.
+- For the short lock-screen test, the user was instructed to lock Windows with
+  Win+L and lock the phone while keeping the computer running without sleep.
+  The real turn waited 30 seconds, ran only `git status --short`, and modified
+  no files. In response to the lock-screen receipt check, the user confirmed
+  **one notification with almost no delay**. Device lock state was not independently
+  observed, and latency was not measured.
+
+The installation's core initialization checks are complete: offline tests,
+configured hook, manual receipt and real-turn receipt. Basic background and
+short lock-screen receipt also passed based on the user's reports. Long-duration
+lock, computer sleep and network-switching scenarios were not tested. Phone model,
+mobile app/OS versions and network conditions have not been recorded for this
+installation. These results do not complete the broader cross-device V1 matrix.
+No topic, token, original notification content or private configuration is included
+here. No runtime code was changed. Only this sanitized validation record is
+published; the sender settings, user-level hook and private backup remain local.
