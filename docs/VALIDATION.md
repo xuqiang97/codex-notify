@@ -4,7 +4,7 @@ Initial implementation validation was performed on 2026-09-20, followed by
 Windows device checks on 2026-09-22 and local corrections on 2026-09-23.
 This is not a claim that all V1 device acceptance criteria have been met.
 
-## Current acceptance status (2026-09-23)
+## Current acceptance status (2026-09-28)
 
 The current Windows-to-Xiaomi installation is accepted and in maintenance. The
 user confirmed real phone receipt after the final metadata privacy correction;
@@ -12,6 +12,11 @@ see [the final correction record](#final-metadata-privacy-correction-2026-09-23)
 for its offline checks, published revision and CI evidence. Earlier checks also
 covered a short combined background/lock-screen scenario and the same task in
 local Work mode; these are not blanket guarantees for other environments.
+
+A second Windows installation completed initialization, real-turn, background
+and short lock-screen checks on 2026-09-28. The user subsequently confirmed that
+it reused the same personal topic and received notifications successfully; see
+[the additional Windows record](#additional-windows-computer-initialization--2026-09-28).
 
 Full cross-device V1 acceptance remains bounded by the
 [real-environment checklist](#real-environment-acceptance-checklist). Historical
@@ -290,7 +295,7 @@ to the evidence.
 | Environment | Required evidence | Status |
 | --- | --- | --- |
 | Windows machine A → ntfy → Xiaomi/Android | Manual smoke; real Codex completed turn; exactly one notification | Baseline passed; real receipt after the final metadata privacy correction confirmed by user, without a new latency/count measurement |
-| Windows machine B → same personal topic | Distinct device alias; no source changes | Pending |
+| Windows machine B → same personal topic | Distinct device alias; no source changes | Passed on 2026-09-28: user confirmed shared-topic receipt and the correct device alias; no runtime code changes; see the additional Windows record below |
 | macOS → ntfy → iPhone | Manual smoke; real Codex completed turn; exactly one notification | Receipt reported on 2026-09-20; exact count/latency pending |
 | Two users with different topics | No cross-user receipt | Pending |
 | Xiaomi/HyperOS | Foreground, background, locked immediately/after several minutes; Wi-Fi/cellular | Basic and combined short lock-screen receipt passed; extended/network matrix pending |
@@ -324,6 +329,13 @@ Repository baseline: `721a4f6`, with an initially clean working tree. This is a
 separate installation from the earlier Windows acceptance record. Environment:
 Windows 11 build 26200, Python 3.14.6, desktop app 26.924.2738.0, and the running
 desktop core executable reporting `codex-cli 0.158.0-alpha.2.1`.
+
+In a subsequent follow-up, the user explicitly confirmed that this second computer
+reused the original personal topic and successfully completed the notification
+flow. Combined with the correct-device-alias receipt reports below, this validates
+the two-computer shared-topic use case. Topic reuse is user-reported evidence;
+private topic values were not collected or compared across computers. This does
+not establish simultaneous delivery timing or isolation between different users.
 
 - All 93 offline tests passed; compilation and the initial Git diff check passed.
   These checks published nothing and do not establish a new cross-platform CI result.
