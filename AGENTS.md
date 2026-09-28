@@ -71,8 +71,8 @@ A payload may contain additional fields in current or future Codex versions. Unk
 
 Official references:
 
-- https://developers.openai.com/docs/config-file/config-advanced
-- https://developers.openai.com/docs/config-file/config-reference
+- https://learn.chatgpt.com/docs/config-file/config-advanced
+- https://learn.chatgpt.com/docs/config-file/config-reference
 
 Important configuration constraint:
 
@@ -207,14 +207,14 @@ or classify background tasks from the reply text.
 ### Optional task name
 
 The user requested recognizable project/task completion notifications. Task-title
-lookup is opt-in with `CODEX_NOTIFY_TASK_TITLE=1` (default `0`). Use only the exact
+lookup is enabled by default with `CODEX_NOTIFY_TASK_TITLE=1`; `0` disables it. Use only the exact
 event `thread-id` to look up the latest matching `thread_name` in the existing
 `CODEX_HOME/session_index.jsonl` (default home `~/.codex`). Read at most the final
 1 MiB, never modify it, and never read transcripts/databases or derive a title
 from user prompts. This is best-effort internal metadata, not an official API.
 Missing/unreadable/changed metadata must fall back to project-only notifications.
 Apply privacy checks before truncating the title to 80 characters. The local title
-can itself contain sensitive text: document the disclosure when opting in. No new database or history service.
+can itself contain sensitive text: document the default disclosure and how to disable it. No new database or history service.
 
 ### 6.1 Device name
 
@@ -302,7 +302,7 @@ NTFY_SERVER=https://ntfy.sh
 NTFY_TOPIC=<high-entropy-topic>
 NTFY_TOKEN=
 CODEX_NOTIFY_DEVICE=<optional-friendly-device-name>
-CODEX_NOTIFY_TASK_TITLE=0
+CODEX_NOTIFY_TASK_TITLE=1
 CODEX_NOTIFY_TIMEOUT=5
 CODEX_NOTIFY_PROJECT_ROOTS=[]
 ```
@@ -595,8 +595,50 @@ do not request them in chat or expose them through commands or logs.
 
 For another computer owned by the same person, explain that an existing personal
 topic and phone subscription can be reused with a different non-sensitive device
-alias. Keep default scope `[]`; enable task names only with explicit consent.
+alias. Keep default scope `[]`; explain that task names default to enabled and
+may disclose sensitive text. Set `CODEX_NOTIFY_TASK_TITLE=0` to disable them.
+Preserve explicit settings; a missing task-title setting now defaults to `1`
+(Decision 019).
 Run offline tests separately from manual smoke/real-turn phone verification, and
 record only the evidence actually observed. When changing everyday settings,
 explain next-invocation loading and environment overrides. Pausing must use the
 master switch, not broken credentials or removal of an unrelated desktop handler.
+
+### Agent/user responsibilities and acceptance
+
+When the user requests new-computer initialization, read README's setup checklist
+and responsibility table as well as this contract, IMPLEMENTATION and DECISIONS.
+Proceed with authorized local inspection, file preparation, offline tests and
+hook configuration; do not merely tell the user to perform computer-side steps
+that your available tools can perform. If tools or permissions prevent an action,
+state the specific limitation and the minimum user action required.
+
+- Check actual Python/sender/helper paths and the existing user-level config.
+  Preserve unrelated settings and wrappers; do not assume a particular desktop
+  version or replace an existing forwarded command without understanding it.
+  Validate edited TOML and referenced paths without dumping private config.
+- Create `.env` only when absent. The user privately enters the real topic/token;
+  never ask for them in chat, dump `.env`, or run a secret-generating command whose
+  output would be exposed in a tool result. Direct the user to their own private
+  terminal/editor when generating or transferring a topic. Validate with sanitized
+  results and continue after the user confirms it is saved.
+- Run offline tests independently. Once private settings and phone subscription
+  are ready, run the requested smoke test. Wait for the user's receipt report;
+  a successful command or HTTP result alone is not phone acceptance. Diagnose a
+  reported failure before proceeding to a full-success claim.
+- The user operates the phone: subscription, notification permissions, lock state
+  and receipt/count/latency confirmation. An existing personal subscription may
+  be reused; do not require the user to recreate it.
+- Before a desktop restart, summarize completed checks, pending checks and a safe
+  continuation instruction. Have the user quit/reopen the app and return; do not
+  terminate the active desktop session yourself during ordinary setup. After the
+  user resumes, perform a safe real turn such as `git status --short`, then obtain
+  confirmation of that turn's notification. Do not infer receipt from the earlier
+  smoke test or try to confirm it before the turn has ended.
+- Coordinate background/lock-screen checks with the user; record their conditions
+  and result separately. Do not infer untested devices or long-lock/network cases.
+- Report initialization complete only when offline tests pass, the intended hook
+  is configured, and the user has confirmed manual-test and real-turn receipt.
+  Otherwise identify completed steps and what remains. Document only sanitized,
+  actually observed evidence. Local setup does not authorize commit/push; publish
+  repository changes only when the user explicitly requests publication.

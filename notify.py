@@ -26,7 +26,7 @@ class Config:
     provider: str
     device: str = field(repr=False)
     ntfy: ntfy.NtfyConfig = field(repr=False)
-    task_title: bool = False
+    task_title: bool = True
     project_roots: tuple[PurePosixPath | PureWindowsPath, ...] = field(default=(), repr=False)
 
 
@@ -119,7 +119,7 @@ def load_config(
     provider = values.get("CODEX_NOTIFY_PROVIDER", "ntfy").strip().lower()
     if provider != "ntfy":
         raise ConfigurationError("CODEX_NOTIFY_PROVIDER must be ntfy in V1")
-    task_title = values.get("CODEX_NOTIFY_TASK_TITLE", "0").strip()
+    task_title = values.get("CODEX_NOTIFY_TASK_TITLE", "1").strip()
     if task_title not in ("0", "1"):
         raise ConfigurationError("CODEX_NOTIFY_TASK_TITLE must be 0 or 1")
     device = values.get("CODEX_NOTIFY_DEVICE", "").strip()

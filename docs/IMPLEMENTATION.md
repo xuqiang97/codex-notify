@@ -103,7 +103,7 @@ path markers, including quoted credential keys. Normalize whitespace and remove
 unsafe control characters. A rejected device/project label uses its generic
 fallback; a rejected task name is omitted without suppressing the notification.
 These heuristics cannot identify arbitrary confidential prose or unknown secrets.
-Device/project labels must be non-sensitive; task-title disclosure remains opt-in.
+Device/project labels must be non-sensitive; task-title disclosure is enabled by default and can be disabled.
 
 The title contains the available project and optional task name, followed by
 `本轮已结束`; if neither is available, it starts with `Codex`. The body contains
@@ -114,7 +114,8 @@ IDs in the outgoing display content. See README for the exact examples.
 ### Optional task names
 
 `CODEX_NOTIFY_TASK_TITLE=1` enables a best-effort lookup in the existing local
-`session_index.jsonl`; default `0` avoids the lookup entirely. `task_metadata.py`
+`session_index.jsonl`; this is the default. Setting `0` avoids the lookup entirely.
+Explicit `0` remains disabled on upgrade; an absent setting now defaults to `1`. `task_metadata.py`
 validates the event's UUID-shaped `thread-id` and reads at most the final 1 MiB of
 the index under process-environment `CODEX_HOME` (default `~/.codex`). It searches
 backward for the latest matching ID and uses that record's nonempty `thread_name`.
@@ -124,7 +125,8 @@ This index is an internal detail, not a stable public API. Missing, unreadable,
 changed or out-of-tail metadata must fall back without blocking delivery. Stale
 index data can show an older task name. Do not modify the index, read transcripts
 or databases, or extract a task title from prompts. The title itself may contain
-sensitive text, so opting in permits its disclosure subject to the limited checks.
+sensitive text; the default allows its disclosure subject to the limited checks.
+Document `CODEX_NOTIFY_TASK_TITLE=0` for users who want to omit it.
 
 ## 5. ntfy transport and failure handling
 
@@ -167,7 +169,7 @@ in README. Keep coverage for:
   next-invocation changes and explicit manual-test skips.
 - Windows/POSIX/UNC project names, optional scope, component boundaries and cwd fallback.
 - Unicode, whitespace, truncation and privacy checks before truncation.
-- Task-name opt-in, exact matching, latest rename, bounded index reads and safe fallbacks.
+- Task-name default, explicit disable and precedence, exact matching, latest rename, bounded index reads and safe fallbacks.
 - No reply/input content in requests or diagnostics, including with obsolete settings.
 - JSON request formation, auth, TLS/network errors, redirect refusal, size and deadlines.
 - CLI invocation from another working directory and paths containing spaces/Unicode.
@@ -188,6 +190,15 @@ Follow README for the manual smoke test and user-level Codex hook setup. Use the
 actual Python executable and sender path. Preserve any existing desktop Computer
 Use wrapper; its forwarding mechanism is version-specific. The separate CLI on
 PATH is not evidence of which runtime the desktop app uses.
+
+For new-computer setup, README's responsibility table and AGENTS section 19
+define the handoff. The agent performs available computer-side checks and hook
+configuration; the user supplies secrets privately, operates the phone, restarts
+the desktop app and confirms receipt. Before restart, leave a clear continuation
+instruction. Resume with a safe real turn after the user returns, and wait for
+its separate phone confirmation. Keep offline success, manual receipt, real-turn
+receipt and background/lock-screen results distinct; pending user actions are
+not completed acceptance. No installer wizard or runtime automation is added.
 
 Acceptance requires phone receipt, not just an HTTP response or exit code. On a
 new installation or a relevant runtime/configuration change, confirm a real Codex

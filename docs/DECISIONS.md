@@ -27,8 +27,8 @@ Consequence:
 
 References:
 
-- https://developers.openai.com/docs/config-file/config-advanced
-- https://developers.openai.com/docs/config-file/config-reference
+- https://learn.chatgpt.com/docs/config-file/config-advanced
+- https://learn.chatgpt.com/docs/config-file/config-reference
 
 ## Decision 002 — Use Python and keep `notify.py` as the entry point
 
@@ -299,6 +299,9 @@ For Xiaomi/HyperOS in particular, background/battery behavior should be tested i
 
 ## Decision 014 — Project-first titles and optional local task names
 
+The default-off/opt-in policy below is superseded by Decision 019; lookup bounds
+and privacy checks remain unchanged.
+
 **Status:** Accepted after the user requested specific project/task completion
 notifications instead of the generic completion title.
 
@@ -353,7 +356,8 @@ not evidence of success. Preserve default length 300, existing environment keys,
 privacy checks and task-title fallback. No AI summarization, reply classification,
 new language framework, retries or history storage is added.
 
-Task-title lookup remains opt-in and disabled by default for other users; the
+At this stage, task-title lookup remained opt-in and disabled by default for other users
+(default policy later superseded by Decision 019); the
 current user explicitly enabled it locally. Missing titles never suppress a push.
 The user also chose unrestricted local scope after directory filtering missed a
 normal task in a managed worktree. Decision 015's optional capability remains for
@@ -404,6 +408,21 @@ Codex hook or add a persistent service to pause delivery.
 README owns the new-computer checklist and everyday settings instructions. No
 automatic configuration wizard, new provider, preview content or history store
 is introduced. Defaults and existing enabled behavior remain unchanged.
+
+## Decision 019 — Enable task names by default
+
+**Status:** Accepted on 2026-09-28 at the user's explicit request.
+
+Set `CODEX_NOTIFY_TASK_TITLE` to default `1` in the sender and public template.
+This supersedes the default-off/opt-in policy in Decisions 014 and 016. Preserve
+explicit `0` settings and process-environment-over-dotenv precedence. An existing
+installation with no setting now enables lookup after updating; document this
+migration and the `0` opt-out clearly.
+
+Task names may contain sensitive text and can leave the computer by default.
+Retain the bounded exact-thread local index lookup, privacy checks and graceful
+project-only fallback. Explicit `0` performs no title lookup. Do not expand to
+transcripts, prompts, replies or other metadata sources. No other defaults change.
 
 ## Changing these decisions
 

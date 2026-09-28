@@ -90,7 +90,7 @@ class NotificationTitleTests(OfflineTest):
     def setUp(self):
         super().setUp()
         with patch("notify.read_env", return_value={}):
-            self.config = notify.load_config(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="1"))
+            self.config = notify.load_config(dict(VALUES))
 
     def test_named_task_and_project_without_reply_content(self):
         with patch("notify.lookup_task_title", return_value="修复登录问题") as lookup:

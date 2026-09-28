@@ -301,3 +301,19 @@ to the evidence.
 Record OS, Python, Codex and mobile app versions, test time, observed delivery
 latency/count, and pass/fail for each row when tested. V1's complete end-to-end
 acceptance remains pending until these checks are performed.
+
+
+## Default-enabled task names — 2026-09-28
+
+Decision 019 changes the sender and `.env.example` task-title default to `1`.
+README, AGENTS and implementation guidance describe the disclosure, explicit `0`
+opt-out and migration for installations where the setting was absent. Earlier
+entries describing an opt-in default are historical evidence, not current policy.
+
+Local offline validation: `python -m unittest discover -q` passed all 93 tests.
+Coverage includes default-enabled notification titles with mocked metadata,
+explicit file/environment disabling, environment precedence in both directions,
+template alignment, no title lookup for disabled/scope-skipped notifications,
+and existing privacy/fallback behavior. Compilation and `git diff --check` passed.
+No private `.env` or user-level hook configuration was changed. No manual push or
+new phone receipt was verified for this change, and no new CI result is claimed.

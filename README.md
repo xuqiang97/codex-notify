@@ -22,10 +22,49 @@ private configuration; cloning does not transfer another computer's `.env` or ho
 1. Install Git/Python, clone to a stable path, and confirm the actual interpreter below.
 2. Run `python -m unittest discover -v` (`python3` on macOS). This needs no real topic and sends nothing.
 3. Create the sender's `.env` only if absent. Choose an existing personal topic or generate a new one locally; set a distinct device alias.
-4. Keep project scope `[]`. Task names are off by default; explicitly opt in with `CODEX_NOTIFY_TASK_TITLE=1` if wanted.
+4. Keep project scope `[]`. Task names are on by default and may disclose sensitive title text; set `CODEX_NOTIFY_TASK_TITLE=0` to omit them.
 5. Subscribe on the phone if needed, then run the manual smoke test and confirm receipt.
 6. Inspect and back up the existing user-level Codex config, preserve any desktop wrapper, and use this computer's actual Python/sender paths.
 7. Restart Codex if needed and confirm a real completed turn reaches the phone. Offline tests and HTTP success alone are not device acceptance.
+
+### Set up a new computer with Codex
+
+Open this repository as a local project in the desktop app and explicitly ask
+Codex to initialize this computer. Reading or cloning the repository does not
+install the hook automatically. With local file/command access, Codex can perform
+the computer-side work below; you supply private settings and confirm phone receipt.
+
+| Step | Codex handles | You handle |
+| --- | --- | --- |
+| Environment | Inspect Git state, Python version/executable, repository location and existing configuration; guide or perform an authorized dependency installation | Complete any installer/admin prompts; install and sign in to the desktop app if needed |
+| Sender settings | Create `.env` only if absent; preserve existing values; set a non-sensitive device alias and requested switches | Choose the device alias and privately enter the real topic/token in a local editor |
+| Offline checks | Run the offline test suite and investigate failures without publishing notifications | No phone action needed |
+| Phone subscription | Explain the server/topic and permission checks without displaying secrets | Install/configure ntfy and subscribe, or reuse your existing personal subscription |
+| Manual smoke test | After you confirm settings are saved, run the smoke test and inspect sanitized diagnostics | Confirm receipt, observed count and any delay; report these without copying private notification content |
+| Desktop hook | Inspect and back up user-level config, resolve actual paths, preserve any existing wrapper, configure forwarding and check syntax/path existence | Complete any required local access approval |
+| Restart | Explain what is configured, what has been verified and what remains; provide the next test instruction | Fully quit/reopen the desktop app when requested and return to the same project/task |
+| Real-turn test | After you return, run a safe task such as `git status --short` without changing files | Confirm the notification for that completed turn; smoke-test receipt does not substitute for this |
+| Background/lock test | Arrange a short delayed safe task and record only the reported results | Put the app in the background/lock the computer and phone as agreed, then confirm receipt |
+
+You can start with this instruction:
+
+> 请先阅读 AGENTS.md、README.md、docs/IMPLEMENTATION.md 和 docs/DECISIONS.md，
+> 按文档完成这台新电脑的 codex-notify 初始化、离线测试和用户级 Codex Hook 接入。
+> 保留现有配置和桌面 Hook 包装器。我会在本地填写真实 Topic/Token，不要在聊天或日志中输出。
+> 需要我填写配置、操作手机、重启或确认通知时，请明确告知。不要提交或推送 GitHub。
+
+After restarting, return and say: “已重启，请继续真实通知验证：只运行
+`git status --short`，不修改文件。” After that turn ends, check your phone and
+report whether its notification arrived. The sender cannot confirm phone receipt
+on your behalf. If the desktop version uses a different hook arrangement, Codex
+must inspect that installation rather than blindly paste an example.
+
+Initialization is complete only after offline checks pass, the intended hook is
+configured, and you confirm both manual-test and real-turn phone receipt. Report
+background/lock-screen checks separately as passed, failed or not tested. If your
+input or a restart is still pending, report the completed steps and the exact next
+action instead of declaring full acceptance. Setup does not require code changes
+or GitHub publication.
 
 For another computer owned by the same person, reusing the existing personal
 topic lets the existing phone subscription receive both computers' messages.
@@ -60,8 +99,15 @@ Python and paths and has not been validated here.
 ## 2. Configure a private topic locally
 
 For first-time setup only, copy `.env.example` to **`.env` beside `notify.py`**.
-If `.env` already exists, edit it instead of copying over it. Generate a topic
-only if you are not reusing an existing personal one:
+If `.env` already exists, edit it instead of copying over it. For ordinary use of
+the default ntfy.sh service, fill in `NTFY_TOPIC` and preferably set
+`CODEX_NOTIFY_DEVICE`; the other settings can keep their defaults. Device alias
+is optional (blank uses the hostname). Task names are enabled by default; disable
+them if their disclosure is inappropriate. This configures the sender only;
+complete the tests and Codex hook setup below too. On Windows, make sure the file
+is named `.env`, not `.env.txt`.
+
+Generate a topic only if you are not reusing an existing personal one:
 
 Windows PowerShell:
 
@@ -80,7 +126,9 @@ python3 -c "import secrets; print(secrets.token_hex(24))"
 open -e .env
 ```
 
-These commands print a fresh 48-character random topic locally. Paste it into
+Run topic generation yourself in a private local terminal, not through an agent
+tool whose output appears in the conversation. Skip generation when reusing your
+existing personal topic. These commands print a fresh 48-character random topic locally. Paste it into
 `NTFY_TOPIC` in `.env`, replacing the template. Do not share the output, commit it,
 paste it into issues, or put it in shell commands/history. Save `.env` as UTF-8
 (Windows UTF-8 BOM and CRLF are supported). Restrict Windows file access to your
@@ -98,7 +146,7 @@ different aliases. Different people should generate different topics.
 | `NTFY_TOPIC` | Required | 1–64 ASCII letters/digits/`_`/`-`; use the random generator |
 | `NTFY_TOKEN` | Empty | Optional bearer token for an authenticated server/account |
 | `CODEX_NOTIFY_DEVICE` | Hostname | Blank also uses the hostname; label capped at 64 characters |
-| `CODEX_NOTIFY_TASK_TITLE` | `0` | `1` opts into local task-title lookup; may disclose sensitive title text |
+| `CODEX_NOTIFY_TASK_TITLE` | `1` | Local task-title lookup enabled; may disclose sensitive title text; `0` disables it |
 | `CODEX_NOTIFY_PROJECT_ROOTS` | `[]` | Optional JSON array of absolute folders; nonempty restricts notification to event cwd within those folders |
 | `CODEX_NOTIFY_TIMEOUT` | `5` | Total delivery wait and socket timeout in seconds; `0 < value <= 30` |
 
@@ -284,8 +332,8 @@ token in this config. Restart Codex, run a small task, and verify one notificati
 for its completed turn. Multiple completed turns produce multiple notifications;
 there is no history or deduplication store.
 
-References: [official notify documentation](https://developers.openai.com/zh-Hans/docs/config-file/config-advanced)
-and [configuration reference](https://developers.openai.com/docs/config-file/config-reference).
+References: [official notify documentation](https://learn.chatgpt.com/docs/config-file/config-advanced)
+and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 The external hook and terminal `tui.notifications` are different features.
 V1 only handles `agent-turn-complete`; approval events are ignored.
 
@@ -322,7 +370,7 @@ The body uses Chinese labels: 设备 (device), 项目 (project), optional 任务
 状态 (status). There is no reply preview. Status always means the turn
 ended; it does not infer success, failure, or a request for approval. Only the
 computer tag is sent, without a success checkmark.
-To also show the Codex task name, add this opt-in setting to the sender's `.env`:
+Codex task names are enabled by default when available. The sender's `.env` uses:
 
 ```dotenv
 CODEX_NOTIFY_TASK_TITLE=1
@@ -340,10 +388,10 @@ my-app · 修复登录问题 · 本轮已结束
 ```
 
 Notifications never include assistant replies or user-input excerpts. Task names
-are separate local metadata and remain an explicit opt-in.
+are separate local metadata, enabled by default; set `CODEX_NOTIFY_TASK_TITLE=0` to omit them.
 
 The official completion event is not assumed to contain a task title. When
-explicitly enabled, the sender matches its `thread-id` to the existing local
+enabled, the sender matches its `thread-id` to the existing local
 `session_index.jsonl` in `CODEX_HOME` (default `~/.codex`). It reads only the last
 1 MiB and uses the latest matching `thread_name`, capped at 80 characters after
 privacy checks. It never uses `input-messages` or another task's name as a fallback,
@@ -357,9 +405,14 @@ folder basename, not necessarily a custom sidebar project label. The synthetic
 smoke test has no thread ID, so it intentionally shows only the project.
 
 Task names may contain sensitive words or originate from your initial request.
-Enabling this option permits that bounded title to leave the computer. Rename
-sensitive tasks or keep the option disabled. The same conservative content filters
+With the default enabled setting, that bounded title can leave the computer. Rename
+sensitive tasks or set `CODEX_NOTIFY_TASK_TITLE=0` to disable the lookup and display. The same conservative content filters
 apply; they cannot detect arbitrary confidential prose.
+
+Existing installations: an explicit `CODEX_NOTIFY_TASK_TITLE=0` remains disabled.
+If this setting is absent from both `.env` and the process environment, upgrading
+to the default-enabled version enables task-name lookup. Set it to `0` before
+upgrading if you want project-only notifications. Environment overrides still win.
 
 ## Privacy and security boundaries
 
@@ -374,8 +427,7 @@ apply; they cannot detect arbitrary confidential prose.
   needed. A token does not by itself make an otherwise public topic private.
 - `.env` and `.env.*` are Git-ignored, except the safe `.env.example`. Never use
   `git add -f` for private config. The template topic is rejected by the sender.
-- Only device alias, project **basename**, fixed turn-ended status and (when opted
-  in) a bounded task title are sent. User inputs, assistant replies, thread/turn
+- Only device alias, project **basename**, fixed turn-ended status and (when enabled and available) a bounded task title are sent. User inputs, assistant replies, thread/turn
   IDs, unknown fields and the raw event are not forwarded. Project uses an
   absolute event `cwd` if usable, otherwise process cwd, then `unknown-project`.
   Both Windows and POSIX paths work. Project/device labels are capped at 64
@@ -384,7 +436,7 @@ apply; they cannot detect arbitrary confidential prose.
   URLs, code/credential markers (including quoted JSON credential keys) and the
   configured topic/token. These checks are
   **not a guarantee against arbitrary confidential prose or unknown credentials**.
-  Keep device/project labels non-sensitive and leave task names disabled when
+  Keep device/project labels non-sensitive and disable task names when
   their disclosure is inappropriate. Removing reply previews does not anonymize
   metadata. No source files, diffs or conversations are read from disk; the
   optional task-name lookup only reads the bounded local index described above.

@@ -155,14 +155,29 @@ class ConfigTests(OfflineTest):
         self.assertEqual(config.provider, "ntfy")
         self.assertEqual(config.ntfy.server, "https://ntfy.sh")
         self.assertEqual(config.ntfy.timeout, 5)
-        self.assertFalse(config.task_title)
+        self.assertTrue(config.task_title)
 
-    def test_task_title_opt_in_validation(self):
+    def test_task_title_switch_validation(self):
+        self.assertFalse(self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="0")).task_title)
         self.assertTrue(self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="1")).task_title)
         for value in ("", "true", "2", "private-value"):
             with self.assertRaises(ConfigurationError) as raised:
                 self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE=value))
             self.assertNotIn("private-value", str(raised.exception))
+
+    def test_task_title_explicit_file_disable_and_environment_precedence(self):
+        self.path.write_text("CODEX_NOTIFY_TASK_TITLE=0\n", encoding="utf-8")
+        config = self.load()
+        self.assertFalse(config.task_title)
+        with patch("notify.lookup_task_title", side_effect=AssertionError("no index reads")):
+            notify.build_notification({"type": "agent-turn-complete"}, config)
+        self.assertTrue(self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="1")).task_title)
+        self.path.write_text("CODEX_NOTIFY_TASK_TITLE=1\n", encoding="utf-8")
+        self.assertFalse(self.load(dict(VALUES, CODEX_NOTIFY_TASK_TITLE="0")).task_title)
+
+    def test_public_template_enables_task_names(self):
+        config = notify.load_config(VALUES, ROOT / ".env.example")
+        self.assertTrue(config.task_title)
 
     def test_blank_device_uses_hostname_and_hostname_failure_degrades(self):
         with patch("notify.socket.gethostname", side_effect=OSError("private hostname")):
@@ -291,9 +306,13 @@ class ProjectScopeTests(OfflineTest):
                 patch.dict(os.environ, dict(VALUES, CODEX_NOTIFY_PROJECT_ROOTS='["D:/Projects"]'), clear=True), \
                 patch.object(sys, "argv", ["notify.py", json.dumps(event)]), \
                 patch("notify.ntfy.send_notification") as send, \
-                patch("notify.lookup_task_title", side_effect=AssertionError("no index reads")), \
+                patch("notify.lookup_task_title", return_value=None) as lookup, \
                 contextlib.redirect_stderr(io.StringIO()) as error:
             result = notify.main()
+        if send.called:
+            lookup.assert_called_once_with(event)
+        else:
+            lookup.assert_not_called()
         return result, error.getvalue(), send
 
     def test_runtime_suggestion_event_is_silently_skipped_before_building(self):
